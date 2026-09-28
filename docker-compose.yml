@@ -1,0 +1,15 @@
+services:
+  studentassistant:
+    build: .
+    image: studentassistant:latest
+    container_name: studentassistant
+    ports:
+      - "8100:8100"
+    volumes:
+      - ./data:/app/data # 数据库文件在这里，备份 = 备份 data 目录
+    environment:
+      - TZ=Asia/Shanghai
+      # 设置访问密码（可选）。不设置则局域网内无需登录。
+      # 修改后需删除 data 目录下的 token 缓存并重新登录。
+      - APP_PASSWORD=${APP_PASSWORD:-}
+    restart: unless-stopped
