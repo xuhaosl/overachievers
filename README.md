@@ -45,11 +45,11 @@ docker compose up -d --build
 
 1. **Compose 一键部署**（新版本支持）：Docker → Compose → 新建，粘贴 `docker-compose.yml` 的内容，启动
 2. **本地镜像导入**：
-   - 在电脑上执行 `docker build -t studentassistant:latest .`，再 `docker save -o studentassistant.tar studentassistant:latest`
-   - 把 `studentassistant.tar` 拷进极空间，Docker → 镜像 → 本地导入
+   - 在电脑上执行 `docker build -t overachievers:latest .`，再 `docker save -o overachievers.tar overachievers:latest`
+   - 把 `overachievers.tar` 拷进极空间，Docker → 镜像 → 本地导入
    - 用该镜像创建容器：
      - 端口映射：`8100 -> 8100`
-     - 文件夹映射：在极空间个人空间建一个 `studentassistant` 文件夹，映射到容器 `/app/data`
+     - 文件夹映射：在极空间个人空间建一个 `overachievers` 文件夹，映射到容器 `/app/data`
      - 环境变量（可选）：`APP_PASSWORD=你的密码`、`TZ=Asia/Shanghai`
 
 ### 访问密码（可选）

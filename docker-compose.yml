@@ -1,8 +1,8 @@
 services:
-  studentassistant:
+  overachievers:
     build: .
-    image: studentassistant:latest
-    container_name: studentassistant
+    image: overachievers:latest
+    container_name: overachievers
     ports:
       - "8100:8100"
     volumes:
