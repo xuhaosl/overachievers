@@ -33,7 +33,7 @@ def _row_dict(model, row) -> dict:
 @router.get("/export")
 def export_data(db: Session = Depends(get_db)):
     data = {
-        "app": "studentassistant",
+        "app": "overachievers",
         "version": 1,
         "exported_at": datetime.now().isoformat(timespec="seconds"),
         "tables": {},

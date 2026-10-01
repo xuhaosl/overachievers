@@ -16,7 +16,7 @@ def auth_enabled() -> bool:
 
 
 def make_token() -> str:
-    return hashlib.sha256(f"studentassistant:{APP_PASSWORD}".encode()).hexdigest()
+    return hashlib.sha256(f"overachievers:{APP_PASSWORD}".encode()).hexdigest()
 
 
 def require_auth(request: Request) -> None:

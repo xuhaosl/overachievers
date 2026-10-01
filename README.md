@@ -23,7 +23,7 @@
 
 ## 数据说明
 
-- 所有数据存在 **一个 SQLite 文件** 里（`data/studentassistant.db`），成绩图片在 `data/uploads/`
+- 所有数据存在 **一个 SQLite 文件** 里（`data/overachievers.db`），成绩图片在 `data/uploads/`
 - 备份 = 复制 `data` 目录，或直接用系统内「设置 → 数据备份」导出 JSON
 - 数据完全保存在你自己的机器上，不经过任何第三方
 

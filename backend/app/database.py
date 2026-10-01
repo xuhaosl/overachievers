@@ -8,7 +8,7 @@ from sqlalchemy.orm import DeclarativeBase, sessionmaker
 DATA_DIR = Path(os.environ.get("DATA_DIR", Path(__file__).resolve().parents[2] / "data"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-DB_PATH = DATA_DIR / "studentassistant.db"
+DB_PATH = DATA_DIR / "overachievers.db"
 
 engine = create_engine(
     f"sqlite:///{DB_PATH}",
