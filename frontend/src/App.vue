@@ -3,7 +3,7 @@
     <!-- 移动端顶栏 -->
     <el-header v-if="isMobile" class="mobile-header">
       <el-button :icon="Menu" text @click="drawer = true" />
-      <span class="app-title">学生成绩助手</span>
+      <span class="app-title">卷王之王</span>
       <span />
     </el-header>
     <el-drawer v-model="drawer" direction="ltr" size="200px" :with-header="false">
@@ -12,7 +12,7 @@
 
     <!-- 桌面侧栏 -->
     <el-aside v-if="!isMobile" width="200px">
-      <div class="logo">学生成绩助手</div>
+      <div class="logo">卷王之王</div>
       <SideMenu />
     </el-aside>
 

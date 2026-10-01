@@ -47,7 +47,7 @@ def overview(child_id: int | None = None, db: Session = Depends(get_db)):
             start_year = s.date.year if s.date.month >= 8 else s.date.year - 1
             hit = resolve_stage_grade(classes, start_year)
             stage = hit[0] if hit else ""
-        # 标题：学科单元，如"数学第1单元"；meta：阶段年级学期，如"小学5年级第1学期"
+        # 标题：学科单元，如"某学科第N单元"；meta：阶段年级学期，如"某年级第N学期"
         unit_part = "、".join(f"第{u.sort_no}单元" for u in sorted(s.units, key=lambda u: (u.sort_no, u.id)))
         term_part = (s.term or "").split(" ")[-1] if s.term else ""
         title = f"{s.subject.name if s.subject else ''}{unit_part}"

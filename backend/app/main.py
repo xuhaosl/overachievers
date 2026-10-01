@@ -272,7 +272,7 @@ def _migrate():
 
 _migrate()
 
-app = FastAPI(title="学生成绩助手", version="0.1.0")
+app = FastAPI(title="卷王之王", version="0.1.0")
 
 # 开发模式下前端 vite 跨域用
 app.add_middleware(

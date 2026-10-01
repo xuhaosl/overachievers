@@ -123,7 +123,7 @@ const loading = ref(true)
 const uploading = ref(false)
 const showEdit = ref(false)
 
-// 标题：阶段年级学期学科单元，如"小学5年级第1学期英语第1单元"
+// 标题：阶段年级学期学科单元，如"某年级第N学期某学科第N单元"
 const pageTitle = computed(() => {
   const v = s.value
   if (!v) return ''

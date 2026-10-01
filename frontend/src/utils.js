@@ -49,7 +49,7 @@ export function currentClassRec(classes, childId) {
   return recs.find((r) => classGradeAt(r, todayStr()) != null) || recs[0] || null
 }
 
-// 成绩显示："85（10）/110"，无附加分时 "85/100"
+// 成绩显示："得分（附加分）/总分"，无附加分时 "得分/总分"
 export function scoreDisplay(score) {
   const base = `${score.regular_score}${
     score.bonus_score != null ? `（${score.bonus_score}）` : ''
@@ -86,7 +86,7 @@ export function inferTerm(dateStr) {
   return `${y - 1}-${y} 第2学期`
 }
 
-// 成绩的显示标签："85（10）" 或 "85"
+// 成绩的显示标签："得分（附加分）" 或 "得分"
 export function earnedLabel(s) {
   return s.bonus_score != null ? `${s.regular_score}（${s.bonus_score}）` : `${s.regular_score}`
 }

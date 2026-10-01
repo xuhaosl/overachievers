@@ -278,7 +278,7 @@ function rankTooltip(p) {
 }
 
 // 单科图：上图得分（实线）、下图排名（虚线）。
-// 横坐标为简写类目：单科"五上1"（短学期名+单元序号）、场次"四下末"（短学期名+末），按时间排列；
+// 横坐标为简写类目：单科"N上N"（短学期名+单元序号）、场次"N下末"（短学期名+末），按时间排列；
 // 各视图按类型过滤；期中期末页（withTotal）叠加场次总分/总排名线
 function renderSingle(typeFilters, withTotal = false) {
   const picked = subjects.value
@@ -290,8 +290,8 @@ function renderSingle(typeFilters, withTotal = false) {
   if (withTotal)
     maxTotal = Math.max(maxTotal, ...allExams.value.filter((x) => typeFilters.includes(x.type)).map((x) => x.total_sum || 0))
 
-  // 简写标签：期中期末视图里，单科成绩与场次同口径（"三上末"），同学期归入同一类目；
-  // 单元测验视图为"五上1"（短学期名+单元序号），无单元时显示"？"
+  // 简写标签：期中期末视图里，单科成绩与场次同口径（"N上末"），同学期归入同一类目；
+  // 单元测验视图为"N上N"（短学期名+单元序号），无单元时显示"？"
   const isTotalView = typeFilters.includes('期中考试') || typeFilters.includes('期末考试')
   const unitLabel = (row) => {
     if (isTotalView) return `${row.term_short || ''}末`
@@ -347,7 +347,7 @@ function renderSingle(typeFilters, withTotal = false) {
       })
   }
   // 期中期末页：场次总分（上图实线）＋班级排名/年级排名（下图虚线）。
-  // 年级排名按学年计算、上下学期相同，只取下学期（四下末、五下末）的场次
+  // 年级排名按学年计算、上下学期相同，只取下学期（N下末）的场次
   if (withTotal) {
     const exams = allExams.value
       .filter((x) => typeFilters.includes(x.type))

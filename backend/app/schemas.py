@@ -250,9 +250,9 @@ class SubjectLatest(ORMModel):
     subject_color: str
     latest_date: Date | None = None
     latest_rate: float | None = None
-    latest_display: str = ""  # 如 "85（10）/110"
-    title: str = ""  # 学科单元，如"数学第1单元"
-    meta: str = ""  # 阶段年级学期，如"小学5年级第1学期"
+    latest_display: str = ""  # 如 "得分（附加分）/总分"
+    title: str = ""  # 学科单元，如"某学科第N单元"
+    meta: str = ""  # 阶段年级学期，如"某年级第N学期"
     class_rank: RankValue = None
     grade_rank: RankValue = None
     tags: str = ""

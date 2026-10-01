@@ -71,7 +71,7 @@ const dialog = ref(false)
 const saving = ref(false)
 const newRival = ref({ no: '', name: '' })
 
-// 标题：学校+年级+班级（归属孩子），如「某某小学5年级6班（某某）」
+// 标题：学校+年级+班级（归属孩子），如「某某小学N年级N班（某某）」
 const headTitle = computed(() => {
   const r = rec.value
   if (!r) return ''

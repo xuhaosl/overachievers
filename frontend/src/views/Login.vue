@@ -1,7 +1,7 @@
 <template>
   <div class="login-wrap">
     <el-card class="login-card">
-      <h2 style="text-align: center">学生成绩助手</h2>
+      <h2 style="text-align: center">卷王之王</h2>
       <el-form @submit.prevent="doLogin">
         <el-form-item>
           <el-input v-model="password" type="password" placeholder="请输入访问密码" show-password />
