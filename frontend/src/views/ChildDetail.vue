@@ -104,7 +104,7 @@ const dialog = ref(false)
 const saving = ref(false)
 const form = ref({})
 
-// 标题：孩子名字（当前阶段年级），如「小黑（初中2年级）」；全部毕业则显示（小学已毕业）
+// 标题：孩子名字（当前阶段年级），如「某某（初中2年级）」；全部毕业则显示（小学已毕业）
 const headTitle = computed(() => {
   const c = child.value
   if (!c) return ''
