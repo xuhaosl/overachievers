@@ -1,63 +1,69 @@
 <template>
   <div>
-    <div class="toolbar">
-      <el-button type="primary" :icon="Plus" @click="openAdd">添加孩子</el-button>
+    <div class="page-head">
+      <h3>孩子管理</h3>
+      <el-button type="primary" @click="openAdd">添加孩子</el-button>
     </div>
+    <p class="hint">孩子的学校/年级/班级/学号等信息从「班级管理」里归属的班级自动提取（按时间推算），此处只维护姓名、首次入学时间、备注</p>
 
-    <el-table :data="list" v-loading="loading">
-      <el-table-column prop="name" label="姓名" width="120" />
-      <el-table-column prop="gender" label="性别" width="80" />
-      <el-table-column label="年级" width="100">
-        <template #default="{ row }">{{ gradeLabel(row.grade) }}</template>
+    <el-table :data="list" v-loading="loading" @row-click="goDetail" class="clickable">
+      <el-table-column prop="name" label="姓名" width="110" sortable />
+      <el-table-column prop="school" label="学校" min-width="140" sortable>
+        <template #default="{ row }">{{ row.school || '-' }}</template>
       </el-table-column>
-      <el-table-column prop="birth_date" label="出生日期" width="130" />
-      <el-table-column prop="school" label="学校" />
-      <el-table-column prop="note" label="备注" />
-      <el-table-column label="成绩数" width="90">
-        <template #default="{ row }">{{ row.score_count }}</template>
+      <el-table-column prop="stage" label="阶段" width="80" sortable>
+        <template #default="{ row }">{{ row.stage || '-' }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="220" fixed="right">
+      <el-table-column prop="grade" label="年级" width="90" sortable>
+        <template #default="{ row }">{{ gradeLabel(row.grade) || '-' }}</template>
+      </el-table-column>
+      <el-table-column prop="class_name" label="班级" width="90" sortable>
+        <template #default="{ row }">{{ row.class_name || '-' }}</template>
+      </el-table-column>
+      <el-table-column prop="student_no" label="学号" width="90" sortable>
+        <template #default="{ row }">{{ row.student_no || '-' }}</template>
+      </el-table-column>
+      <el-table-column prop="score_count" label="成绩数" width="90" sortable>
         <template #default="{ row }">
-          <el-button size="small" @click="openEdit(row)">编辑</el-button>
-          <el-popconfirm
-            :title="`确认把 ${row.name} 升到 ${gradeLabel(Math.min(row.grade + 1, 9))}？新成绩将自动记录新年级`"
-            @confirm="advance(row)"
-          >
-            <template #reference>
-              <el-button size="small" type="success" :disabled="row.grade >= 9">升年级</el-button>
-            </template>
-          </el-popconfirm>
-          <el-button size="small" type="danger" @click="del(row)">删除</el-button>
+          <el-link type="primary" :underline="false" @click.stop="$router.push({ path: '/list', query: { tab: 'single', child_id: row.id } })">
+            {{ row.score_count }}
+          </el-link>
+        </template>
+      </el-table-column>
+      <el-table-column label="操作" width="150" fixed="right">
+        <template #default="{ row }">
+          <el-button size="small" type="primary" text @click.stop="openEdit(row)">编辑</el-button>
+          <el-button size="small" type="danger" text @click.stop="del(row)">删除</el-button>
         </template>
       </el-table-column>
     </el-table>
 
-    <el-dialog v-model="dialog" :title="form.id ? '编辑孩子' : '添加孩子'" width="420px">
-      <el-form :model="form" label-width="80px">
-        <el-form-item label="姓名" required>
-          <el-input v-model="form.name" maxlength="50" />
-        </el-form-item>
-        <el-form-item label="性别">
-          <el-radio-group v-model="form.gender">
-            <el-radio value="男">男</el-radio>
-            <el-radio value="女">女</el-radio>
-            <el-radio value="">不填</el-radio>
-          </el-radio-group>
-        </el-form-item>
-        <el-form-item label="出生日期">
-          <el-date-picker v-model="form.birth_date" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
-        </el-form-item>
-        <el-form-item label="年级" required>
-          <el-select v-model="form.grade" style="width: 100%">
-            <el-option v-for="g in 9" :key="g" :value="g" :label="gradeLabel(g)" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="学校">
-          <el-input v-model="form.school" maxlength="100" />
-        </el-form-item>
-        <el-form-item label="备注">
-          <el-input v-model="form.note" type="textarea" :rows="2" />
-        </el-form-item>
+    <el-dialog v-model="dialog" :title="form.id ? '编辑孩子' : '添加孩子'" width="640px">
+      <el-form :model="form" label-position="top">
+        <el-row :gutter="12">
+          <el-col :span="8">
+            <el-form-item label="姓名" required>
+              <el-input v-model="form.name" maxlength="50" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="8">
+            <el-form-item label="首次入学时间">
+              <el-date-picker
+                v-model="form.first_enroll_year"
+                type="year"
+                placeholder="小学入学年份"
+                value-format="YYYY"
+                style="width: 100%"
+              />
+            </el-form-item>
+          </el-col>
+          <el-col :span="8">
+            <el-form-item label="备注">
+              <el-input v-model="form.note" maxlength="200" />
+            </el-form-item>
+          </el-col>
+        </el-row>
+        <p class="tip">学校、阶段、年级、班级、学号：请在「设置 → 班级管理」中编辑归属与入学时间，系统自动提取</p>
       </el-form>
       <template #footer>
         <el-button @click="dialog = false">取消</el-button>
@@ -69,17 +75,18 @@
 
 <script setup>
 import { onMounted, ref } from 'vue'
-import { Plus } from '@element-plus/icons-vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { api, errMsg, confirmDelete } from '../api'
 import { gradeLabel } from '../utils'
 import { store } from '../store'
 
+const router = useRouter()
 const list = ref([])
 const loading = ref(false)
 const dialog = ref(false)
 const saving = ref(false)
-const emptyForm = { name: '', gender: '', birth_date: null, grade: 1, school: '', note: '' }
+const emptyForm = { name: '', first_enroll_year: null, note: '' }
 const form = ref({ ...emptyForm })
 
 async function load() {
@@ -99,17 +106,28 @@ function openAdd() {
   form.value = { ...emptyForm }
   dialog.value = true
 }
+
+function goDetail(row) {
+  router.push(`/child/${row.id}`)
+}
+
 function openEdit(row) {
-  form.value = { ...row }
+  form.value = {
+    id: row.id,
+    name: row.name,
+    first_enroll_year: row.first_enroll_year ? String(row.first_enroll_year) : null, // 年份选择器需要字符串
+    note: row.note || '',
+  }
   dialog.value = true
 }
 
 async function save() {
   if (!form.value.name) return ElMessage.warning('请填姓名')
+  const payload = { ...form.value, first_enroll_year: form.value.first_enroll_year ? Number(form.value.first_enroll_year) : null }
   saving.value = true
   try {
-    if (form.value.id) await api.put(`/children/${form.value.id}`, form.value)
-    else await api.post('/children', form.value)
+    if (form.value.id) await api.put(`/children/${form.value.id}`, payload)
+    else await api.post('/children', payload)
     dialog.value = false
     ElMessage.success('已保存')
     load()
@@ -117,16 +135,6 @@ async function save() {
     ElMessage.error(errMsg(e))
   } finally {
     saving.value = false
-  }
-}
-
-async function advance(row) {
-  try {
-    await api.post(`/children/${row.id}/advance-grade`)
-    ElMessage.success(`${row.name} 已升级`)
-    load()
-  } catch (e) {
-    ElMessage.error(errMsg(e))
   }
 }
 
@@ -145,7 +153,26 @@ onMounted(load)
 </script>
 
 <style scoped>
-.toolbar {
+.page-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   margin-bottom: 12px;
+}
+.page-head h3 {
+  margin: 0;
+}
+.hint {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  margin: 0 0 12px;
+}
+.tip {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  line-height: 1.4;
+}
+.clickable :deep(tbody tr) {
+  cursor: pointer;
 }
 </style>

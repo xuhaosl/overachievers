@@ -1,6 +1,10 @@
 <template>
   <div>
     <!-- 筛选栏 -->
+    <div class="page-head">
+      <h3>{{ pageTitle }}</h3>
+    </div>
+
     <el-form inline class="filter">
       <el-form-item label="孩子">
         <el-select v-model="childId" style="width: 120px" @change="onChildChange">
@@ -26,58 +30,80 @@
           style="width: 240px"
         />
       </el-form-item>
-      <el-form-item v-if="chartType === 'rate' || chartType === 'rank'">
-        <el-select v-model="subjectIds" multiple collapse-tags placeholder="选择学科（可多选对比）" style="width: 260px" @change="render">
-          <el-option v-for="s in subjects" :key="s.id" :value="s.id" :label="s.name" />
-        </el-select>
-      </el-form-item>
-      <el-form-item v-if="chartType === 'rank' || chartType === 'examrank'">
-        <el-radio-group v-model="rankMode" @change="render">
-          <el-radio-button value="grade">年级排名</el-radio-button>
-          <el-radio-button value="class">班级排名</el-radio-button>
-        </el-radio-group>
-      </el-form-item>
     </el-form>
-
-    <el-tabs v-model="chartType" @tab-change="onTabChange">
-      <el-tab-pane label="得分率曲线" name="rate" />
-      <el-tab-pane label="总分曲线" name="exam" />
-      <el-tab-pane label="单科排名曲线" name="rank" />
-      <el-tab-pane label="总分排名曲线" name="examrank" />
-    </el-tabs>
 
     <el-empty v-if="!childId" description="请先选择孩子" />
     <el-empty v-else-if="empty" :description="emptyText" />
-    <div v-show="childId && !empty" ref="chartEl" class="chart"></div>
+    <template v-else>
+      <div class="chart-head">
+        <h3>得分曲线</h3>
+        <!-- 曲线点选控件：标题右侧，点击切换显示/隐藏 -->
+        <div class="legend-line">
+          <span
+            v-for="it in scoreLegend"
+            :key="it.name"
+            class="lg"
+            :class="{ off: scoreHide.has(it.name) }"
+            @click="toggleScore(it.name)"
+          >
+            <i :style="{ background: it.color }"></i>{{ it.name }}
+          </span>
+        </div>
+      </div>
+      <el-card shadow="never">
+        <div ref="scoreChartEl" class="chart"></div>
+      </el-card>
+      <div class="chart-head rank-title">
+        <h3>排名曲线</h3>
+        <div class="legend-line">
+          <span
+            v-for="it in rankLegend"
+            :key="it.name"
+            class="lg"
+            :class="{ off: rankHide.has(it.name) }"
+            @click="toggleRank(it.name)"
+          >
+            <i :style="{ background: it.color }"></i>{{ it.name }}
+          </span>
+        </div>
+      </div>
+      <el-card shadow="never">
+        <div ref="rankChartEl" class="chart"></div>
+      </el-card>
+    </template>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, ref, nextTick } from 'vue'
+import { computed, onMounted, onUnmounted, ref, nextTick, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import * as echarts from 'echarts'
 import { ElMessage } from 'element-plus'
 import { api, errMsg } from '../api'
 import { store, setChild } from '../store'
-import { gradeLabel, inferTerm, ratePercent } from '../utils'
+import { gradeLabel, inferTerm, ratePercent, rankNum, rankText } from '../utils'
 
+const route = useRoute()
 const childId = ref(store.childId)
 const rangeType = ref('all')
 const customRange = ref(null)
-const chartType = ref('rate')
-const rankMode = ref('grade')
-const subjectIds = ref([])
+const chartType = ref(route.query.type || 'single')
+// 曲线排名只用班级排名（年级排名按学年统计，逻辑待定）
+const rankMode = ref('class')
 const subjects = ref([])
 const allScores = ref([])
 const allExams = ref([])
 
-const chartEl = ref(null)
-let chart = null
+const scoreChartEl = ref(null)
+const rankChartEl = ref(null)
+let scoreChart = null
+let rankChart = null
 const empty = ref(false)
 
 const emptyText = computed(() => {
   if (rangeType.value === 'term') return '本学期暂无数据，试试切换时间范围'
   if (rangeType.value === 'year') return '本学年暂无数据，试试切换时间范围'
-  return '暂无成绩数据，先去「录成绩」录入一些成绩吧'
+  return '暂无成绩数据，先去「成绩列表 → 新建成绩」录入一些成绩吧'
 })
 
 // ---------- 时间过滤 ----------
@@ -94,11 +120,11 @@ function inDateRange(dateStr) {
   }
   return true
 }
-// 学期匹配（1月属于上一学年下学期，所以直接比日期区间更可靠）
+// 学期匹配（1月属于上一学年第二学期，所以直接比日期区间更可靠）
 function termRangeOf(term) {
-  // "2026-2027 上学期" -> 2026-08-01 ~ 2027-01-31；下学期 -> 2027-02-01 ~ 2027-07-31
+  // "2026-2027 第1学期" -> 2026-08-01 ~ 2027-01-31；第2学期 -> 2027-02-01 ~ 2027-07-31（兼容旧的"第一/第二学期"）
   const [a, b] = term.split(' ')[0].split('-').map(Number)
-  if (term.includes('上')) return [`${a}-08-01`, `${b}-01-31`]
+  if (/第(一|1)学期/.test(term)) return [`${a}-08-01`, `${b}-01-31`]
   return [`${b}-02-01`, `${b}-07-31`]
 }
 function sameTerm(dateStr) {
@@ -128,171 +154,278 @@ async function loadData() {
   }
 }
 
-function onTabChange() {
-  // 切到排名/得分率时默认全选学科
-  if ((chartType.value === 'rate' || chartType.value === 'rank') && !subjectIds.value.length) {
-    subjectIds.value = subjects.value.map((s) => s.id)
-  }
-  render()
-}
+// 菜单切换「单元测验/期中期末」子项时组件被复用，跟随 query 更新并重绘
+watch(
+  () => route.query.type,
+  (v) => {
+    chartType.value = v || 'single'
+    render()
+  },
+)
+
+// 页头标题
+const pageTitle = computed(
+  () =>
+    ({
+      single: '单元测验',
+      total: '期中期末',
+    })[chartType.value] || '成长曲线',
+)
 
 // ---------- 绘图 ----------
 function showChart() {
   empty.value = false
-  // 同步初始化，保证紧随其后的 chart.setOption() 不会拿到 null；
-  // 首帧可能还在隐藏态，尺寸交给 nextTick 的 resize 修正
-  if (!chart) chart = echarts.init(chartEl.value)
-  nextTick(() => chart?.resize())
+  // v-else 切换后 DOM 会重建，实例指向旧节点时需重建；首帧隐藏态尺寸交给 nextTick 修正
+  if (!scoreChart || scoreChart.getDom() !== scoreChartEl.value) {
+    scoreChart?.dispose()
+    scoreChart = echarts.init(scoreChartEl.value)
+  }
+  if (!rankChart || rankChart.getDom() !== rankChartEl.value) {
+    rankChart?.dispose()
+    rankChart = echarts.init(rankChartEl.value)
+  }
+  nextTick(() => {
+    scoreChart?.resize()
+    rankChart?.resize()
+  })
 }
 function setEmpty() {
   empty.value = true
-  if (chart) chart.clear()
+  scoreChart?.clear()
+  rankChart?.clear()
 }
 
 function render() {
   if (!childId.value) return setEmpty()
-  if (chartType.value === 'rate') return renderRate()
-  if (chartType.value === 'exam') return renderExam()
-  if (chartType.value === 'rank') return renderRank()
-  return renderExamRank()
+  // 每个曲线视图对应一组成绩类型；期中期末页额外叠加场次总分/总排名线
+  const typeMap = {
+    single: ['单元测试'],
+    total: ['期中考试', '期末考试'],
+  }
+  return renderSingle(typeMap[chartType.value] || [], chartType.value === 'total')
 }
 
-// 得分率曲线：多科各一条线，纵轴 0~100%
-function renderRate() {
-  const picked = subjects.value.filter((s) => subjectIds.value.includes(s.id))
-  const series = picked
-    .map((s) => {
-      const pts = allScores.value
-        .filter((x) => x.subject_id === s.id)
-        .sort((a, b) => (a.date > b.date ? 1 : -1))
-        .map((x) => [x.date, Math.round(x.rate * 1000) / 10])
-      return {
+// 横坐标类目 → 日期映射：tooltip 按 label 反查原始数据
+let scoreDateMap = {}
+
+// 曲线点选控件（标题右侧）：图例列表与隐藏集合，点击切换后重绘
+const scoreLegend = ref([])
+const rankLegend = ref([])
+const scoreHide = ref(new Set())
+const rankHide = ref(new Set())
+function toggleScore(name) {
+  const next = new Set(scoreHide.value)
+  next.has(name) ? next.delete(name) : next.add(name)
+  scoreHide.value = next
+  render()
+}
+function toggleRank(name) {
+  const next = new Set(rankHide.value)
+  next.has(name) ? next.delete(name) : next.add(name)
+  rankHide.value = next
+  render()
+}
+
+// 得分图骨架：横轴为单元/场次简写，纵轴 80 ~ 满分+5
+function scoreOption(series, catLabels, maxTotal = 0) {
+  return {
+    tooltip: { trigger: 'item', formatter: scoreTooltip },
+    grid: { left: 30, right: 15, top: 18, bottom: 26 },
+    xAxis: { type: 'category', data: catLabels, axisLabel: { interval: 0, fontSize: 11 } },
+    yAxis: { type: 'value', min: 80, max: (maxTotal || 100) + 5, name: '得分', nameLocation: 'start', nameGap: 16 },
+    series,
+  }
+}
+
+// 排名图骨架：横轴为单元/场次简写，纵轴固定 20~1（反转，越小越高）
+function rankOption(series, catLabels) {
+  return {
+    tooltip: { trigger: 'item', formatter: rankTooltip },
+    grid: { left: 30, right: 15, top: 18, bottom: 26 },
+    xAxis: { type: 'category', data: catLabels, axisLabel: { interval: 0, fontSize: 11 } },
+    yAxis: {
+      type: 'value',
+      inverse: true,
+      min: 1,
+      max: 20,
+      minInterval: 1,
+      name: rankMode.value === 'grade' ? '年级名次' : '班级名次',
+    },
+    series,
+  }
+}
+
+// 得分图悬浮提示：含得分率与名次参考
+function scoreTooltip(p) {
+  if (p.seriesName === '总分') {
+    const e = allExams.value.find((x) => x.date === scoreDateMap[p.value[0]])
+    return `总分<br/>${p.value[0]}<br/>得分 <b>${p.value[1]}</b>${e && e.total_sum ? ` / ${e.total_sum}` : ''}`
+  }
+  const s = subjects.value.find((x) => x.name === p.seriesName)
+  const date = scoreDateMap[p.value[0]]
+  const row = allScores.value.find((x) => s && x.subject_id === s.id && x.date === date)
+  if (!row) return `${p.seriesName}<br/>${p.value[0]}<br/>${p.value[1]}`
+  const ranks =
+    row.grade_rank != null || row.class_rank != null
+      ? `<br/>${[rankText(row.grade_rank, ''), rankText(row.class_rank, '')].filter(Boolean).join(' · ')}`
+      : ''
+  return `${p.seriesName}<br/>${p.value[0]}（${row.type}）<br/>得分 <b>${row.regular_score}${row.bonus_score != null ? `（${row.bonus_score}）` : ''}</b> / ${row.total}<br/>得分率 <b>${ratePercent(row.rate)}</b>${ranks}`
+}
+
+// 排名图悬浮提示：系列名（学科/总分/班级排名/年级排名）+ 名次数字
+function rankTooltip(p) {
+  return `${p.seriesName}<br/>${p.value[0]}<br/>第 <b>${p.value[1]}</b> 名`
+}
+
+// 单科图：上图得分（实线）、下图排名（虚线）。
+// 横坐标为简写类目：单科"五上1"（短学期名+单元序号）、场次"四下末"（短学期名+末），按时间排列；
+// 各视图按类型过滤；期中期末页（withTotal）叠加场次总分/总排名线
+function renderSingle(typeFilters, withTotal = false) {
+  const picked = subjects.value
+  const rankKey = rankMode.value === 'grade' ? 'grade_rank' : 'class_rank'
+
+  // 得分图纵坐标量程：80 ~ 满分+5（单科 total / 场次 total_sum 的最大值），无数据时 80~105
+  const inView = allScores.value.filter((x) => typeFilters.includes(x.type) && picked.some((s) => s.id === x.subject_id))
+  let maxTotal = Math.max(0, ...inView.map((x) => x.total || 0))
+  if (withTotal)
+    maxTotal = Math.max(maxTotal, ...allExams.value.filter((x) => typeFilters.includes(x.type)).map((x) => x.total_sum || 0))
+
+  // 简写标签：期中期末视图里，单科成绩与场次同口径（"三上末"），同学期归入同一类目；
+  // 单元测验视图为"五上1"（短学期名+单元序号），无单元时显示"？"
+  const isTotalView = typeFilters.includes('期中考试') || typeFilters.includes('期末考试')
+  const unitLabel = (row) => {
+    if (isTotalView) return `${row.term_short || ''}末`
+    const nos = [...(row.unit_names || '').matchAll(/第(\d+)单元/g)].map((m) => m[1])
+    return `${row.term_short || ''}${nos.join('') || '?'}`
+  }
+  const examLabel = (e) => `${e.term_short || ''}末`
+
+  // 收集类目（label 去重，按日期排序）
+  const cats = []
+  const catDates = new Map()
+  const addCat = (label, date) => {
+    if (!catDates.has(label)) {
+      catDates.set(label, date)
+      cats.push({ label, date })
+    }
+  }
+
+  const scoreSeries = []
+  const rankSeries = []
+  for (const s of picked) {
+    const rows = allScores.value
+      .filter((x) => x.subject_id === s.id && typeFilters.includes(x.type))
+      .sort((a, b) => (a.date > b.date ? 1 : -1))
+    const scorePts = rows.map((x) => {
+      addCat(unitLabel(x), x.date)
+      return [unitLabel(x), x.earned]
+    })
+    const rankPts = rows
+      .filter((x) => rankNum(x[rankKey]) != null)
+      .map((x) => {
+        addCat(unitLabel(x), x.date)
+        return [unitLabel(x), rankNum(x[rankKey])]
+      })
+    if (scorePts.length)
+      scoreSeries.push({
         name: s.name,
         type: 'line',
-        data: pts,
+        data: scorePts,
         connectNulls: false,
         color: s.color,
-        label: { show: pts.length <= 12, position: 'top', formatter: (p) => `${p.value[1]}%`, fontSize: 10 },
-      }
-    })
-    .filter((se) => se.data.length)
-  if (!series.length) return setEmpty()
+        label: { show: scorePts.length <= 12, position: 'top', fontSize: 10 },
+      })
+    if (rankPts.length)
+      rankSeries.push({
+        name: s.name,
+        type: 'line',
+        data: rankPts,
+        connectNulls: false,
+        color: s.color,
+        lineStyle: { type: 'dashed' },
+        label: { show: rankPts.length <= 15, position: 'bottom', fontSize: 10 },
+      })
+  }
+  // 期中期末页：场次总分（上图实线）＋班级排名/年级排名（下图虚线）。
+  // 年级排名按学年计算、上下学期相同，只取下学期（四下末、五下末）的场次
+  if (withTotal) {
+    const exams = allExams.value
+      .filter((x) => typeFilters.includes(x.type))
+      .sort((a, b) => (a.date > b.date ? 1 : -1))
+    const scorePts = exams
+      .filter((x) => x.total_sum > 0)
+      .map((x) => {
+        addCat(examLabel(x), x.date)
+        return [examLabel(x), x.earned_sum]
+      })
+    const classPts = exams
+      .filter((x) => rankNum(x.class_rank) != null)
+      .map((x) => {
+        addCat(examLabel(x), x.date)
+        return [examLabel(x), rankNum(x.class_rank)]
+      })
+    const gradePts = exams
+      .filter((x) => rankNum(x.year_rank) != null && (x.term_short || '').endsWith('下'))
+      .map((x) => {
+        addCat(examLabel(x), x.date)
+        return [examLabel(x), rankNum(x.year_rank)]
+      })
+    if (scorePts.length)
+      scoreSeries.push({
+        name: '总分',
+        type: 'line',
+        data: scorePts,
+        color: '#8B5CF6',
+        label: { show: scorePts.length <= 12, position: 'top', fontSize: 10 },
+      })
+    if (classPts.length)
+      rankSeries.push({
+        name: '班级排名',
+        type: 'line',
+        data: classPts,
+        color: '#8B5CF6',
+        lineStyle: { type: 'dashed' },
+        label: { show: classPts.length <= 15, position: 'bottom', fontSize: 10 },
+      })
+    if (gradePts.length)
+      rankSeries.push({
+        name: '年级排名',
+        type: 'line',
+        data: gradePts,
+        color: '#E6A23C',
+        lineStyle: { type: 'dashed' },
+        label: { show: gradePts.length <= 15, position: 'bottom', fontSize: 10 },
+      })
+  }
+  if (!scoreSeries.length && !rankSeries.length) return setEmpty()
+  // 类目按时间排列
+  cats.sort((a, b) => (a.date > b.date ? 1 : -1))
+  const catLabels = cats.map((c) => c.label)
+  scoreDateMap = Object.fromEntries(cats.map((c) => [c.label, c.date]))
   showChart()
-  chart.setOption(
-    {
-      tooltip: {
-        trigger: 'item',
-        formatter: (p) => {
-          const s = allScores.value.find(
-            (x) => x.subject_id === picked.find((ps) => ps.name === p.seriesName)?.id && x.date === p.value[0],
-          )
-          return s
-            ? `${p.seriesName}<br/>${p.value[0]}<br/>得分 <b>${s.regular_score}${s.bonus_score != null ? `（${s.bonus_score}）` : ''}</b> / ${s.total}<br/>得分率 <b>${ratePercent(s.rate)}</b>`
-            : `${p.seriesName}<br/>${p.value[0]}<br/>${p.value[1]}%`
-        },
-      },
-      legend: { top: 0 },
-      grid: { left: 50, right: 30, top: 40, bottom: 60 },
-      xAxis: { type: 'time' },
-      yAxis: { type: 'value', min: 0, max: 100, axisLabel: { formatter: '{value}%' } },
-      series,
-    },
+  // 图例状态（点选控件在标题右侧）：隐藏的系列不渲染，点击图例重绘
+  scoreLegend.value = scoreSeries.map((s) => ({ name: s.name, color: s.color }))
+  rankLegend.value = rankSeries.map((s) => ({ name: s.name, color: s.color }))
+  scoreChart.setOption(
+    scoreOption(
+      scoreSeries.filter((s) => !scoreHide.value.has(s.name)),
+      catLabels,
+      maxTotal,
+    ),
     true,
   )
-}
-
-// 总分曲线：按场次聚合，纵轴得分率统一量纲
-function renderExam() {
-  const pts = allExams.value
-    .filter((x) => x.total_sum > 0)
-    .map((x) => [x.date, Math.round(x.rate * 1000) / 10])
-  if (!pts.length) return setEmpty()
-  showChart()
-  chart.setOption(
-    {
-      tooltip: {
-        trigger: 'item',
-        formatter: (p) => {
-          const e = allExams.value.find((x) => x.date === p.value[0])
-          return e
-            ? `${e.name}<br/>${e.date}（${e.type}）<br/>总分 <b>${e.earned_sum}</b> / ${e.total_sum}（${e.score_count} 科）<br/>得分率 <b>${ratePercent(e.rate)}</b>`
-            : `${p.value[0]}<br/>${p.value[1]}%`
-        },
-      },
-      grid: { left: 50, right: 30, top: 30, bottom: 60 },
-      xAxis: { type: 'time' },
-      yAxis: { type: 'value', min: 0, max: 100, axisLabel: { formatter: '{value}%' } },
-      series: [
-        {
-          name: '总分得分率',
-          type: 'line',
-          data: pts,
-          label: { show: pts.length <= 12, position: 'top', formatter: (p) => `${p.value[1]}%`, fontSize: 10 },
-        },
-      ],
-    },
+  rankChart.setOption(
+    rankOption(
+      rankSeries.filter((s) => !rankHide.value.has(s.name)),
+      catLabels,
+    ),
     true,
   )
-}
-
-// 排名曲线公共 option
-function rankOption(name, pts) {
-  showChart()
-  chart.setOption(
-    {
-      tooltip: { trigger: 'item', formatter: (p) => `${name}<br/>${p.value[0]}<br/>${rankMode.value === 'grade' ? '年级' : '班级'}第 <b>${p.value[1]}</b> 名` },
-      grid: { left: 50, right: 30, top: 30, bottom: 60 },
-      xAxis: { type: 'time' },
-      yAxis: { type: 'value', inverse: true, minInterval: 1, name: '名次（越小越高）' },
-      series: [{ name, type: 'line', data: pts, label: { show: pts.length <= 15, position: 'top', fontSize: 10 } }],
-    },
-    true,
-  )
-}
-
-// 单科排名曲线
-function renderRank() {
-  const picked = subjects.value.filter((s) => subjectIds.value.includes(s.id))
-  const series = picked
-    .map((s) => {
-      const key = rankMode.value === 'grade' ? 'grade_rank' : 'class_rank'
-      const pts = allScores.value
-        .filter((x) => x.subject_id === s.id && x[key] != null)
-        .sort((a, b) => (a.date > b.date ? 1 : -1))
-        .map((x) => [x.date, x[key]])
-      return { name: s.name, type: 'line', data: pts, connectNulls: false, color: s.color }
-    })
-    .filter((se) => se.data.length)
-  if (!series.length) return setEmpty()
-  showChart()
-  chart.setOption(
-    {
-      tooltip: {
-        trigger: 'item',
-        formatter: (p) => `${p.seriesName}<br/>${p.value[0]}<br/>${rankMode.value === 'grade' ? '年级' : '班级'}第 <b>${p.value[1]}</b> 名`,
-      },
-      legend: { top: 0 },
-      grid: { left: 50, right: 30, top: 40, bottom: 60 },
-      xAxis: { type: 'time' },
-      yAxis: { type: 'value', inverse: true, minInterval: 1, name: '名次（越小越高）' },
-      series,
-    },
-    true,
-  )
-}
-
-// 总分排名曲线：按场次的总排名
-function renderExamRank() {
-  const key = rankMode.value === 'grade' ? 'grade_rank' : 'class_rank'
-  const pts = allExams.value
-    .filter((x) => x[key] != null)
-    .map((x) => [x.date, x[key]])
-  if (!pts.length) return setEmpty()
-  rankOption('总分排名', pts)
 }
 
 function onResize() {
-  chart?.resize()
+  scoreChart?.resize()
+  rankChart?.resize()
 }
 
 function onChildChange(v) {
@@ -316,24 +449,76 @@ onMounted(async () => {
   try {
     const { data } = await api.get('/subjects')
     subjects.value = data
-    // 默认标签是得分率/单科排名，需要先全选学科，否则会误显示"暂无数据"
-    if (!subjectIds.value.length) subjectIds.value = subjects.value.map((s) => s.id)
   } finally {
     loadData()
   }
 })
 onUnmounted(() => {
   window.removeEventListener('resize', onResize)
-  chart?.dispose()
+  scoreChart?.dispose()
+  rankChart?.dispose()
 })
 </script>
 
 <style scoped>
+.page-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.page-head h3 {
+  margin: 0;
+}
 .filter :deep(.el-form-item) {
   margin-bottom: 8px;
 }
 .chart {
   width: 100%;
-  height: 420px;
+  height: 160px;
+}
+h3 {
+  margin: 14px 0 8px;
+}
+.rank-title {
+  margin-top: 14px;
+}
+/* 曲线标题行：标题居左、点选控件居右 */
+.chart-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+.chart-head h3 {
+  margin: 14px 0 8px;
+}
+.legend-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+.lg {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: #606266;
+  cursor: pointer;
+  user-select: none;
+}
+.lg i {
+  display: inline-block;
+  width: 10px;
+  height: 3px;
+  border-radius: 2px;
+}
+.lg.off {
+  color: #c0c4cc;
+  text-decoration: line-through;
+}
+.lg.off i {
+  background: #c0c4cc !important;
 }
 </style>
