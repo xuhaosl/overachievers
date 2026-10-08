@@ -7,7 +7,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .database import Base, engine
 from .routers import auth as auth_router
-from .routers import backup, children, classes, exams, scores, stats, subjects
+from .routers import backup, children, classes, exams, scores, stats, subjects, update
 
 # 首次启动自动建表
 Base.metadata.create_all(bind=engine)
@@ -290,6 +290,7 @@ app.include_router(exams.router, prefix="/api")
 app.include_router(scores.router, prefix="/api")
 app.include_router(stats.router, prefix="/api")
 app.include_router(backup.router, prefix="/api")
+app.include_router(update.router, prefix="/api")
 
 # 成绩图片目录（不存在则创建），通过 /uploads/<文件名> 访问
 UPLOAD_DIR = Path(__file__).resolve().parents[1] / "data" / "uploads"

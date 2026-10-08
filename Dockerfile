@@ -10,6 +10,10 @@ RUN npm run build
 FROM python:3.12-slim
 WORKDIR /app
 
+# 构建号（git 提交号），由 CI 注入，用于应用内「检查更新」
+ARG APP_VERSION=dev
+ENV APP_VERSION=$APP_VERSION
+
 ENV TZ=Asia/Shanghai \
     PYTHONUNBUFFERED=1 \
     DATA_DIR=/app/data
