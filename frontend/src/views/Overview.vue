@@ -71,10 +71,9 @@
             总分 <b>{{ e.earned_sum }}</b> / {{ e.total_sum }} · 得分率
             <b>{{ ratePercent(e.rate) }}</b>
           </div>
-          <div class="exam-line" v-if="e.year_rank != null || e.class_rank != null">
-            {{ [rankText(e.year_rank, '-'), rankText(e.class_rank, '-')].join(' · ') }}
+          <div class="exam-line" v-if="rankTagsLine(e.year_rank, e.class_rank, e.tags)">
+            {{ rankTagsLine(e.year_rank, e.class_rank, e.tags) }}
           </div>
-          <div class="exam-line" v-if="e.tags">标签：{{ e.tags }}</div>
           <div class="exam-line" v-if="e.note">{{ e.note }}</div>
         </el-card>
       </el-col>
@@ -95,10 +94,9 @@
           <div class="subject-line">{{ s.latest_display }}</div>
           <div class="subject-line">得分率 <b>{{ ratePercent(s.latest_rate) }}</b></div>
           <div class="subject-line muted">{{ [s.meta, s.latest_date].filter(Boolean).join(' · ') }}</div>
-          <div class="subject-line" v-if="s.grade_rank != null || s.class_rank != null">
-            {{ [rankText(s.grade_rank, '-'), rankText(s.class_rank, '-')].join(' · ') }}
+          <div class="subject-line" v-if="rankTagsLine(s.grade_rank, s.class_rank, s.tags)">
+            {{ rankTagsLine(s.grade_rank, s.class_rank, s.tags) }}
           </div>
-          <div class="subject-line" v-if="s.tags">标签：{{ s.tags }}</div>
           <div class="subject-line" v-if="s.note">{{ s.note }}</div>
         </el-card>
       </el-col>
@@ -242,6 +240,14 @@ function toggleSeries(name) {
 
 function resizeChart() {
   chart?.resize()
+}
+
+// 名次与标签合并为一行（更紧凑）：「年级第N名 · 班级第N名 · 标签：xx」，两者都没有则整行隐藏
+function rankTagsLine(rank1, rank2, tags) {
+  const parts = []
+  if (rank1 != null || rank2 != null) parts.push([rankText(rank1, '-'), rankText(rank2, '-')].join(' · '))
+  if (tags) parts.push(`标签：${tags}`)
+  return parts.join(' · ')
 }
 
 async function load() {
