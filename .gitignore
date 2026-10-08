@@ -20,6 +20,9 @@ frontend/dist/
 启动服务.bat
 backend/start_service.ps1
 
+# 个人内部文档（含内网信息，不入库）
+开源准备总结*.md
+
 # IDE
 .idea/
 .vscode/
