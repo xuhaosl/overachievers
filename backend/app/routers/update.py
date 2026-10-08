@@ -94,9 +94,17 @@ def trigger_update():
     try:
         with urllib.request.urlopen(req, timeout=300) as resp:
             resp.read()
+        return {"ok": True, "message": "升级完成，容器已重建"}
+    except urllib.error.HTTPError as e:
+        detail = {
+            401: "升级通道鉴权失败（两端 WATCHTOWER_TOKEN 不一致？）",
+            404: "升级通道不存在（watchtower 未开启 HTTP API？）",
+        }.get(e.code, f"升级通道返回 HTTP {e.code}")
+        raise HTTPException(status_code=502, detail=detail)
     except Exception as e:
-        # watchtower 完成更新会重建本容器，本请求随之被掐断——这是升级成功的正常表现；
-        # 只有「连接被拒绝」说明 watchtower 根本没起来，才算真失败
-        if isinstance(getattr(e, "__cause__", None), ConnectionRefusedError) or "Refused" in str(e):
-            raise HTTPException(status_code=502, detail="无法连接升级通道（watchtower 未运行？）")
-    return {"ok": True, "message": "升级指令已发出，容器将在约 1 分钟内完成重建"}
+        # 连接拒绝 = watchtower 没起来/没开 API，是真失败；
+        # 其余（读超时、连接被重置）= 镜像拉取中或本容器被重建掐断了请求，属升级进行中的正常表现
+        reason = getattr(e, "reason", None) or getattr(e, "__cause__", None)
+        if isinstance(reason, ConnectionRefusedError) or "Refused" in str(e):
+            raise HTTPException(status_code=502, detail="无法连接升级通道（watchtower 未运行或未开启 HTTP API？）")
+        return {"ok": True, "message": "升级指令已接受，容器重建中；若页面长时间未刷新，稍后手动刷新查看版本"}
