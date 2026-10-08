@@ -33,7 +33,40 @@
 
 ## Docker 部署
 
-### 方式一：docker-compose（推荐）
+### 方式一：直接使用镜像（无需源码，推荐）
+
+镜像已发布到 ghcr.io，支持 amd64 / arm64 双架构：
+
+```bash
+docker run -d \
+  --name overachievers \
+  -p 8100:8100 \
+  -v ./data:/app/data \
+  -e TZ=Asia/Shanghai \
+  --restart unless-stopped \
+  ghcr.io/xuhaosl/overachievers:latest
+```
+
+或写成 docker-compose.yml：
+
+```yaml
+services:
+  overachievers:
+    image: ghcr.io/xuhaosl/overachievers:latest
+    container_name: overachievers
+    ports:
+      - "8100:8100"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - TZ=Asia/Shanghai
+      # - APP_PASSWORD=你的密码    # 仅暴露公网时需要，见下文
+    restart: unless-stopped
+```
+
+浏览器打开 `http://<NAS的IP>:8100` 即可使用。
+
+### 方式二：从源码构建
 
 ```bash
 git clone https://github.com/xuhaosl/overachievers.git
@@ -41,19 +74,17 @@ cd overachievers
 docker compose up -d --build
 ```
 
-浏览器打开 `http://<NAS的IP>:8100` 即可使用。
+### 方式三：NAS 图形界面
 
-### 方式二：极空间 NAS 图形界面
+提供 Docker 图形界面的 NAS 一般支持两种方式：
 
-极空间 ZOS 的 Docker 应用支持两种方式：
-
-1. **Compose 一键部署**（新版本支持）：Docker → Compose → 新建，粘贴 `docker-compose.yml` 的内容，启动
+1. **Compose 项目**：Docker → Compose → 新建，粘贴方式一的 YAML，启动
 2. **本地镜像导入**：
    - 在电脑上执行 `docker build -t overachievers:latest .`，再 `docker save -o overachievers.tar overachievers:latest`
-   - 把 `overachievers.tar` 拷进极空间，Docker → 镜像 → 本地导入
+   - 把 `overachievers.tar` 拷进 NAS，Docker → 镜像 → 本地导入
    - 用该镜像创建容器：
      - 端口映射：`8100 -> 8100`
-     - 文件夹映射：在极空间个人空间建一个 `overachievers` 文件夹，映射到容器 `/app/data`
+     - 文件夹映射：在 NAS 上建一个空文件夹映射到容器 `/app/data`
      - 环境变量（可选）：`APP_PASSWORD=你的密码`、`TZ=Asia/Shanghai`
 
 ### 访问密码（可选）
@@ -63,6 +94,38 @@ docker compose up -d --build
 ### 应用内一键升级（v1.0.1+）
 
 运行中的容器即可自助升级，无需删镜像重建：**数据备份 → 版本与升级 → 检查更新 → 一键升级**。升级由 Watchtower（HTTP API 手动触发模式）完成：拉取 ghcr.io 最新镜像并重建容器，`/app/data` 数据目录不受影响。版本号由仓库根目录 `VERSION` 文件定义，CI 构建时注入镜像。
+
+要启用一键升级，把 compose 改为如下结构（watchtower 通过内网调用，不对外暴露端口；token 请改成一个自己的随机字符串）：
+
+```yaml
+services:
+  overachievers:
+    image: ghcr.io/xuhaosl/overachievers:latest
+    container_name: overachievers
+    ports:
+      - "8100:8100"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - TZ=Asia/Shanghai
+      - WATCHTOWER_TOKEN=请改成随机字符串
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
+    restart: unless-stopped
+
+  watchtower:
+    image: containrrr/watchtower
+    container_name: watchtower
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - TZ=Asia/Shanghai
+      - WATCHTOWER_LABEL_ENABLE=true          # 只监控带上面 label 的容器
+      - WATCHTOWER_HTTP_API_UPDATE=true       # 开启 HTTP API 手动触发（1.7.1 实测）
+      - WATCHTOWER_HTTP_API_TOKEN=请改成随机字符串   # 与应用侧 WATCHTOWER_TOKEN 一致
+      - WATCHTOWER_CLEANUP=true               # 升级后自动删旧镜像
+    restart: unless-stopped
+```
 
 ## 本地运行
 
