@@ -1,5 +1,9 @@
 # 卷王之王（overachievers）
 
+[![Docker 镜像构建](https://github.com/xuhaosl/overachievers/actions/workflows/docker.yml/badge.svg)](https://github.com/xuhaosl/overachievers/actions/workflows/docker.yml)
+[![镜像](https://img.shields.io/badge/image-ghcr.io%2Fxuhaosl%2Foverachievers-blue)](https://github.com/xuhaosl/overachievers/pkgs/container/overachievers)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 家庭自用的孩子成绩管理工具：记录、管理、可视化孩子从小学到高中的成绩。单文件 SQLite 存储，部署在自己 NAS / 服务器 / 电脑上，手机电脑浏览器都能用。
 
 ## 功能
