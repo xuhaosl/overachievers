@@ -60,6 +60,10 @@ docker compose up -d --build
 
 默认局域网内无需登录。若要把服务暴露到公网，设置环境变量 `APP_PASSWORD`（或 `docker-compose.yml` 旁放 `.env` 文件），打开页面时会先要求输入密码。
 
+### 应用内一键升级（v1.0.1+）
+
+运行中的容器即可自助升级，无需删镜像重建：**数据备份 → 版本与升级 → 检查更新 → 一键升级**。升级由 Watchtower（HTTP API 手动触发模式）完成：拉取 ghcr.io 最新镜像并重建容器，`/app/data` 数据目录不受影响。版本号由仓库根目录 `VERSION` 文件定义，CI 构建时注入镜像。
+
 ## 本地运行
 
 ```bash
