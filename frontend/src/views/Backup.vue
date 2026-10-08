@@ -49,13 +49,9 @@ const upgrading = ref(false)
 const msg = ref('')
 const isErr = ref(false)
 
-// 启动即取一次当前版本
-api.get('/update/check').then(({ data }) => {
-  version.value = data.current
-  if (data.error) {
-    isErr.value = true
-    msg.value = data.error
-  }
+// 启动只取本机版本号（不访问 GitHub），检查更新由用户手动点
+api.get('/update/version').then(({ data }) => {
+  version.value = data.version
 })
 
 async function doCheck() {
@@ -113,12 +109,14 @@ async function doUpgrade() {
     }
     // 网络错误：多半是容器正在重建，属正常现象，继续轮询
   }
-  // 轮询等待新容器就绪：检查成功、无错误、且不再报"有新版本"才算完成
-  for (let i = 0; i < 40; i++) {
-    await sleep(15000)
+  // 轮询等待新容器就绪：只查本机版本号（不访问 GitHub，不受限流影响）
+  const oldVersion = version.value
+  for (let i = 0; i < 120; i++) {
+    await sleep(5000)
     try {
-      const { data } = await api.get('/update/check')
-      if (!data.error && data.current !== 'dev' && !data.update_available) {
+      const { data } = await api.get('/update/version')
+      if (data.version && data.version !== oldVersion) {
+        version.value = data.version
         ElMessage.success('升级完成')
         setTimeout(() => location.reload(), 800)
         return

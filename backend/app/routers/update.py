@@ -9,8 +9,11 @@ watchtower 拉取 ghcr.io 最新镜像并重建容器；数据在挂载卷里不
 - WATCHTOWER_URL    watchtower 地址（默认 http://watchtower:8080）
 - WATCHTOWER_TOKEN  与 watchtower HTTP API 一致的令牌，未配置则无法触发升级
 """
+import base64
+import json
 import os
 import time
+import urllib.error
 import urllib.request
 
 from fastapi import APIRouter, HTTPException
@@ -25,20 +28,49 @@ WATCHTOWER_URL = (os.environ.get("WATCHTOWER_URL", "") or "http://watchtower:808
 WATCHTOWER_TOKEN = os.environ.get("WATCHTOWER_TOKEN", "")
 
 
+@router.get("/update/version")
+def app_version():
+    """本机版本号（不访问外网），供前端升级等待时轮询。"""
+    return {"version": APP_VERSION}
+
+
+def _fetch_latest_version():
+    """依次尝试 GitHub contents API 与 raw 直连，返回 (版本号, 错误信息)。
+
+    优先 contents API：国内网络对 api.github.com 可达性好；
+    raw.githubusercontent.com 国内经常超时，仅作境外网络兜底。
+    匿名 API 限额 60 次/小时（按 IP），手动检查足够。
+    """
+    try:
+        req = urllib.request.Request(
+            f"https://api.github.com/repos/{REPO}/contents/VERSION?ref=main",
+            headers={"User-Agent": "overachievers", "Accept": "application/vnd.github+json"},
+        )
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        content = base64.b64decode(data.get("content", "")).decode("utf-8").strip()
+        if content:
+            return content, ""
+        return "", "仓库 VERSION 文件为空"
+    except urllib.error.HTTPError as e:
+        api_err = "GitHub API 限流，约 10 分钟后自动恢复" if e.code == 403 else f"GitHub API 错误 {e.code}"
+    except Exception as e:
+        api_err = f"无法连接 GitHub：{e}"
+    # raw 兜底
+    try:
+        url = f"https://raw.githubusercontent.com/{REPO}/main/VERSION?t={int(time.time())}"
+        req = urllib.request.Request(url, headers={"User-Agent": "overachievers"})
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            return resp.read().decode("utf-8").strip(), ""
+    except Exception:
+        return "", api_err
+
+
 @router.get("/update/check")
 def check_update():
     """当前版本 vs 仓库 main 上的 VERSION 文件。"""
     current = "dev" if APP_VERSION == "dev" else APP_VERSION
-    latest = ""
-    error = ""
-    try:
-        # 带时间戳参数绕过 raw.githubusercontent 的 CDN 缓存
-        url = f"https://raw.githubusercontent.com/{REPO}/main/VERSION?t={int(time.time())}"
-        req = urllib.request.Request(url, headers={"User-Agent": "overachievers"})
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            latest = resp.read().decode("utf-8").strip()
-    except Exception as e:  # 断网/限流等都归为检查失败
-        error = f"无法获取最新版本：{e}"
+    latest, error = ("", "") if current == "dev" else _fetch_latest_version()
     update_available = bool(latest) and current != "dev" and current != latest
     return {
         "current": current,
