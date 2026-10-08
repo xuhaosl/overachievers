@@ -113,12 +113,12 @@ async function doUpgrade() {
     }
     // 网络错误：多半是容器正在重建，属正常现象，继续轮询
   }
-  // 轮询等待新容器就绪（新容器里 check 不再报"有新版本"即成功）
-  for (let i = 0; i < 60; i++) {
-    await sleep(4000)
+  // 轮询等待新容器就绪：检查成功、无错误、且不再报"有新版本"才算完成
+  for (let i = 0; i < 40; i++) {
+    await sleep(15000)
     try {
       const { data } = await api.get('/update/check')
-      if (data.current !== 'dev' && !data.update_available) {
+      if (!data.error && data.current !== 'dev' && !data.update_available) {
         ElMessage.success('升级完成')
         setTimeout(() => location.reload(), 800)
         return
