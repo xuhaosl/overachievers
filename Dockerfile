@@ -10,16 +10,17 @@ RUN npm run build
 FROM python:3.12-slim
 WORKDIR /app
 
-# 构建号（git 提交号），由 CI 注入，用于应用内「检查更新」
-ARG APP_VERSION=dev
-ENV APP_VERSION=$APP_VERSION
-
 ENV TZ=Asia/Shanghai \
     PYTHONUNBUFFERED=1 \
     DATA_DIR=/app/data
 
 COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+
+# 构建号（git 提交号），由 CI 注入，用于应用内「检查更新」。
+# 必须放在 pip 层之后：版本号每次构建都变，放前面会令依赖层缓存失效，升级时要重下所有 wheel
+ARG APP_VERSION=dev
+ENV APP_VERSION=$APP_VERSION
 
 COPY backend/ ./backend/
 COPY --from=frontend-build /app/frontend/dist/ ./backend/static/
