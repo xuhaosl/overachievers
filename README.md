@@ -6,6 +6,20 @@
 
 家庭自用的孩子成绩管理工具：记录、管理、可视化孩子从小学到高中的成绩。单文件 SQLite 存储，部署在自己 NAS / 服务器 / 电脑上，手机电脑浏览器都能用。
 
+## 界面预览
+
+| 总览 | 成长曲线（单元测验） |
+|---|---|
+| ![总览](docs/screenshots/overview.png) | ![成长曲线](docs/screenshots/charts-unit.png) |
+
+| 成绩列表 | 考试场次详情 |
+|---|---|
+| ![成绩列表](docs/screenshots/score-list.png) | ![考试场次详情](docs/screenshots/exam-detail.png) |
+
+| 孩子管理 | 单科成绩详情 |
+|---|---|
+| ![孩子管理](docs/screenshots/children.png) | ![单科成绩详情](docs/screenshots/score-detail.png) |
+
 ## 功能
 
 - **孩子管理**：登记孩子（姓名、首次入学时间、备注），阶段/年级/学校/班级按就读经历自动提取，点进详情页可查看绑定的所有班级
