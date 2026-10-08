@@ -9,8 +9,8 @@ watchtower 拉取 ghcr.io 最新镜像并重建容器；数据在挂载卷里不
 - WATCHTOWER_URL    watchtower 地址（默认 http://watchtower:8080）
 - WATCHTOWER_TOKEN  与 watchtower HTTP API 一致的令牌，未配置则无法触发升级
 """
-import json
 import os
+import time
 import urllib.request
 
 from fastapi import APIRouter, HTTPException
@@ -25,21 +25,18 @@ WATCHTOWER_URL = (os.environ.get("WATCHTOWER_URL", "") or "http://watchtower:808
 WATCHTOWER_TOKEN = os.environ.get("WATCHTOWER_TOKEN", "")
 
 
-def _http_json(url: str, headers: dict | None = None, timeout: int = 10):
-    req = urllib.request.Request(url, headers={"User-Agent": "overachievers", **(headers or {})})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return json.loads(resp.read().decode("utf-8"))
-
-
 @router.get("/update/check")
 def check_update():
-    """当前版本 vs 仓库 main 最新提交。"""
-    current = "dev" if APP_VERSION == "dev" else APP_VERSION[:7]
+    """当前版本 vs 仓库 main 上的 VERSION 文件。"""
+    current = "dev" if APP_VERSION == "dev" else APP_VERSION
     latest = ""
     error = ""
     try:
-        data = _http_json(f"https://api.github.com/repos/{REPO}/commits/main")
-        latest = (data.get("sha") or "")[:7]
+        # 带时间戳参数绕过 raw.githubusercontent 的 CDN 缓存
+        url = f"https://raw.githubusercontent.com/{REPO}/main/VERSION?t={int(time.time())}"
+        req = urllib.request.Request(url, headers={"User-Agent": "overachievers"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            latest = resp.read().decode("utf-8").strip()
     except Exception as e:  # 断网/限流等都归为检查失败
         error = f"无法获取最新版本：{e}"
     update_available = bool(latest) and current != "dev" and current != latest
