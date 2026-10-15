@@ -5,7 +5,7 @@
         <el-page-header @back="$router.push({ path: '/list', query: { tab: 'exam' } })">
           <template #content>
             <b>{{ exam.name }}</b>
-            <span v-if="exam.starred" class="head-star">☆</span>
+            <span class="star" :class="{ on: exam.starred }" title="加星/取消星" @click="toggleStar">★</span>
             <el-tag size="small" type="info" style="margin-left: 8px">{{ exam.type }}</el-tag>
           </template>
           <template #extra>
@@ -156,6 +156,16 @@ function displayTotal(row) {
   return `${row.regular_total}${row.bonus_total != null ? `（${row.bonus_total}）` : ''}`
 }
 
+// 点星直接切换星标
+async function toggleStar() {
+  try {
+    const { data } = await api.patch(`/exams/${exam.value.id}/star`, { starred: !exam.value.starred })
+    exam.value.starred = data.starred
+  } catch (err) {
+    ElMessage.error(errMsg(err))
+  }
+}
+
 async function loadExam() {
   loading.value = true
   try {
@@ -245,14 +255,16 @@ onMounted(loadExam)
   gap: 12px;
 }
 .star {
-  color: #f7ba2a;
-  font-weight: 600;
-}
-.head-star {
-  color: #f7ba2a;
+  cursor: pointer;
+  color: #c0c4cc;
   font-size: 20px;
   margin-left: 6px;
   vertical-align: -2px;
+  user-select: none;
+  transition: color 0.15s;
+}
+.star.on {
+  color: #f7ba2a;
 }
 .color-dot {
   display: inline-block;

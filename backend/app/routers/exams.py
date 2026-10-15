@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session, joinedload
 from ..auth import AuthDep
 from ..database import get_db
 from ..models import Child, Exam, SchoolClass, Score, rank_num, rival_names
-from ..schemas import ExamDetail, ExamIn, ExamSummary
+from ..schemas import ExamDetail, ExamIn, ExamSummary, StarIn
 from ..term import grade_at_date, infer_term, resolve_stage_grade, short_term_from_long
 
 router = APIRouter(prefix="/exams", tags=["exams"], dependencies=[AuthDep])
@@ -138,6 +138,17 @@ def update_exam(exam_id: int, body: ExamIn, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(exam)
     return _summary(db, exam)
+
+
+@router.patch("/{exam_id}/star")
+def set_exam_star(exam_id: int, body: StarIn, db: Session = Depends(get_db)):
+    """星标开关（总览卡片点星直接加/取消星）。"""
+    exam = db.get(Exam, exam_id)
+    if not exam:
+        raise HTTPException(404, "考试场次不存在")
+    exam.starred = body.starred
+    db.commit()
+    return {"ok": True, "starred": exam.starred}
 
 
 @router.delete("/{exam_id}")

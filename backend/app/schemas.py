@@ -243,11 +243,16 @@ class ScoreIds(BaseModel):
     ids: list[int]
 
 
+class StarIn(BaseModel):
+    starred: bool
+
+
 # ---------- 统计 ----------
 class SubjectLatest(ORMModel):
     subject_id: int
     subject_name: str
     subject_color: str
+    score_id: int = 0  # 最新一条成绩的 id（总览卡片点星标用）
     latest_date: Date | None = None
     latest_rate: float | None = None
     latest_display: str = ""  # 如 "得分（附加分）/总分"

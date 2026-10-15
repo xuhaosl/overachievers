@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session, joinedload
 from ..auth import AuthDep
 from ..database import get_db
 from ..models import Child, Exam, Score, ScoreImage, SchoolClass, Subject, Unit, rival_names
-from ..schemas import ExamAttachIn, ScoreIds, ScoreIn, ScoreOut
+from ..schemas import ExamAttachIn, ScoreIds, ScoreIn, ScoreOut, StarIn
 from ..uploads import UPLOAD_DIR, image_out, remove_score_image_files, save_score_image
 from ..term import grade_at_date, infer_term, resolve_stage_grade, short_term_from_long
 
@@ -161,6 +161,17 @@ def update_score(score_id: int, body: ScoreIn, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(score)
     return score_to_out(db, score)
+
+
+@router.patch("/{score_id}/star")
+def set_score_star(score_id: int, body: StarIn, db: Session = Depends(get_db)):
+    """星标开关（总览卡片点星直接加/取消星）。"""
+    s = db.get(Score, score_id)
+    if not s:
+        raise HTTPException(404, "成绩不存在")
+    s.starred = body.starred
+    db.commit()
+    return {"ok": True, "starred": s.starred}
 
 
 @router.post("/{score_id}/attach")

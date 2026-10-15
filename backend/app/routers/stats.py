@@ -55,6 +55,7 @@ def overview(child_id: int | None = None, db: Session = Depends(get_db)):
         latest.append(
             SubjectLatest(
                 subject_id=s.subject_id,
+                score_id=s.id,
                 subject_name=s.subject.name,
                 subject_color=s.subject.color,
                 latest_date=s.date,

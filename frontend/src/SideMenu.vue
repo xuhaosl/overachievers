@@ -34,6 +34,10 @@
           <el-icon><component :is="icons.TrendCharts" /></el-icon>
           <span>期中期末</span>
         </el-menu-item>
+        <el-menu-item index="/charts?type=term">
+          <el-icon><component :is="icons.TrendCharts" /></el-icon>
+          <span>学期排名</span>
+        </el-menu-item>
       </el-sub-menu>
       <el-menu-item v-else :index="r.path">
         <el-icon><component :is="icons[r.meta.icon]" /></el-icon>

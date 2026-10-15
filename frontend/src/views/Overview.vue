@@ -57,8 +57,10 @@
       <el-col v-for="e in ov.recent_exams" :key="e.id" :xs="24" :sm="12" :lg="8">
         <el-card shadow="hover" class="exam-card clickable" @click="$router.push(`/exam/${e.id}`)">
           <div class="exam-title">
-            <b>{{ e.name }}</b>
-            <span v-if="e.starred" class="head-star">☆</span>
+            <span class="title-left">
+              <b>{{ e.name }}</b>
+              <span class="star" :class="{ on: e.starred }" title="加星/取消星" @click.stop="toggleExamStar(e)">★</span>
+            </span>
             <el-tag size="small" type="info">{{ e.type }}</el-tag>
           </div>
           <div class="exam-meta">
@@ -74,7 +76,7 @@
           <div class="exam-line" v-if="rankTagsLine(e.year_rank, e.class_rank, e.tags)">
             {{ rankTagsLine(e.year_rank, e.class_rank, e.tags) }}
           </div>
-          <div class="exam-line" v-if="e.note">{{ e.note }}</div>
+          <div class="exam-line">备注：{{ e.note || '无' }}</div>
         </el-card>
       </el-col>
     </el-row>
@@ -90,14 +92,14 @@
         >
           <span class="color-dot" :style="{ background: s.subject_color }" />
           <b>{{ s.title || s.subject_name }}</b>
-          <span v-if="s.starred" class="head-star">☆</span>
+          <span class="star" :class="{ on: s.starred }" title="加星/取消星" @click.stop="toggleScoreStar(s)">★</span>
           <div class="subject-line">{{ s.latest_display }}</div>
           <div class="subject-line">得分率 <b>{{ ratePercent(s.latest_rate) }}</b></div>
           <div class="subject-line muted">{{ [s.meta, s.latest_date].filter(Boolean).join(' · ') }}</div>
           <div class="subject-line" v-if="rankTagsLine(s.grade_rank, s.class_rank, s.tags)">
             {{ rankTagsLine(s.grade_rank, s.class_rank, s.tags) }}
           </div>
-          <div class="subject-line" v-if="s.note">{{ s.note }}</div>
+          <div class="subject-line">备注：{{ s.note || '无' }}</div>
         </el-card>
       </el-col>
     </el-row>
@@ -250,6 +252,26 @@ function rankTagsLine(rank1, rank2, tags) {
   return parts.join(' · ')
 }
 
+// ---------- 星标：卡片上直接点星加/取消 ----------
+async function toggleExamStar(e) {
+  try {
+    const { data } = await api.patch(`/exams/${e.id}/star`, { starred: !e.starred })
+    e.starred = data.starred
+  } catch (err) {
+    ElMessage.error(errMsg(err))
+  }
+}
+
+async function toggleScoreStar(s) {
+  if (!s.score_id) return
+  try {
+    const { data } = await api.patch(`/scores/${s.score_id}/star`, { starred: !s.starred })
+    s.starred = data.starred
+  } catch (err) {
+    ElMessage.error(errMsg(err))
+  }
+}
+
 async function load() {
   setChild(childId.value)
   if (!childId.value && store.children.length) childId.value = store.children[0].id
@@ -368,10 +390,22 @@ h3 {
   color: var(--el-text-color-secondary);
   font-size: 12px;
 }
-.head-star {
-  color: #f7ba2a;
-  font-size: 18px;
-  margin: 0 6px;
+/* 可点星标：未加星灰色，加星金色；点卡片跳详情、点星切换星标 */
+.star {
+  cursor: pointer;
+  color: #c0c4cc;
+  font-size: 16px;
+  margin-left: 6px;
   vertical-align: -2px;
+  user-select: none;
+  transition: color 0.15s;
+}
+.star.on {
+  color: #f7ba2a;
+}
+.title-left {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
 }
 </style>

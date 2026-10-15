@@ -6,7 +6,7 @@
           <template #content>
             <span class="color-dot" :style="{ background: s.subject_color }" />
             <b>{{ pageTitle }}</b>
-            <span v-if="s.starred" class="head-star">☆</span>
+            <span class="star" :class="{ on: s.starred }" title="加星/取消星" @click="toggleStar">★</span>
             <el-tag size="small" type="info" style="margin-left: 8px">{{ s.type }}</el-tag>
           </template>
           <template #extra>
@@ -154,6 +154,16 @@ function totalSum(row) {
   return (row.regular_total || 0) + (row.bonus_total || 0)
 }
 
+// 点星直接切换星标
+async function toggleStar() {
+  try {
+    const { data } = await api.patch(`/scores/${s.value.id}/star`, { starred: !s.value.starred })
+    s.value.starred = data.starred
+  } catch (err) {
+    ElMessage.error(errMsg(err))
+  }
+}
+
 async function load() {
   loading.value = true
   try {
@@ -226,14 +236,16 @@ onMounted(load)
   margin-bottom: 16px;
 }
 .star {
-  color: #f7ba2a;
-  font-weight: 600;
-}
-.head-star {
-  color: #f7ba2a;
+  cursor: pointer;
+  color: #c0c4cc;
   font-size: 20px;
   margin-left: 6px;
   vertical-align: -2px;
+  user-select: none;
+  transition: color 0.15s;
+}
+.star.on {
+  color: #f7ba2a;
 }
 .color-dot {
   display: inline-block;

@@ -52,7 +52,7 @@
         <el-table :data="pagedList" v-loading="loading" size="small" @row-click="(row) => $router.push(`/score/${row.id}`)" style="cursor: pointer">
           <el-table-column prop="starred" label="☆" width="50" sortable :sort-method="(a, b) => (b.starred ? 1 : 0) - (a.starred ? 1 : 0)">
             <template #default="{ row }">
-              <span :class="row.starred ? 'star-on' : 'star-off'">{{ row.starred ? '★' : '☆' }}</span>
+              <span :class="row.starred ? 'star-on' : 'star-off'" title="加星/取消星" @click.stop="toggleStar(row, 'score')">{{ row.starred ? '★' : '☆' }}</span>
             </template>
           </el-table-column>
           <el-table-column prop="date" label="日期" width="105" sortable />
@@ -148,7 +148,7 @@
         <el-table :data="pagedExams" v-loading="examLoading" size="small" @row-click="(row) => $router.push(`/exam/${row.id}`)" style="cursor: pointer">
           <el-table-column prop="starred" label="☆" width="50" sortable :sort-method="(a, b) => (b.starred ? 1 : 0) - (a.starred ? 1 : 0)">
             <template #default="{ row }">
-              <span :class="row.starred ? 'star-on' : 'star-off'">{{ row.starred ? '★' : '☆' }}</span>
+              <span :class="row.starred ? 'star-on' : 'star-off'" title="加星/取消星" @click.stop="toggleStar(row, 'exam')">{{ row.starred ? '★' : '☆' }}</span>
             </template>
           </el-table-column>
           <el-table-column prop="date" label="日期" width="105" sortable />
@@ -213,6 +213,16 @@ const editingScore = ref(null)
 const showExamDialog = ref(false)
 const editingExam = ref(null)
 
+// 点星直接切换星标（@click.stop 已阻止行点击跳详情）
+async function toggleStar(row, kind) {
+  try {
+    const url = kind === 'exam' ? `/exams/${row.id}/star` : `/scores/${row.id}/star`
+    const { data } = await api.patch(url, { starred: !row.starred })
+    row.starred = data.starred
+  } catch (err) {
+    ElMessage.error(errMsg(err))
+  }
+}
 function openEdit(row) {
   editingScore.value = row
   showScoreDialog.value = true
@@ -449,10 +459,14 @@ async function delExam(row) {
 .star-on {
   color: #f7ba2a;
   font-size: 15px;
+  cursor: pointer;
+  user-select: none;
 }
 .star-off {
   color: #dcdfe6;
   font-size: 15px;
+  cursor: pointer;
+  user-select: none;
 }
 .hint {
   color: #909399;
