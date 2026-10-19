@@ -33,16 +33,16 @@
           @tab-remove="removeTerm"
         >
           <el-tab-pane v-for="t in terms" :key="t" :name="t" :label="t">
-            <el-table :data="termUnits" size="small">
-              <el-table-column label="单元序号" width="120">
+            <el-table :data="termUnits" size="small" border @header-dragend="onDragend">
+              <el-table-column label="单元序号" :width="widths['单元序号'] || 120">
                 <template #default="{ row }">第{{ row.sort_no }}单元</template>
               </el-table-column>
-              <el-table-column label="单元名称">
+              <el-table-column label="单元名称" :width="widths['单元名称']" :min-width="widths['单元名称'] || 180">
                 <template #default="{ row }">
                   <el-input v-model="row.name" size="small" placeholder="填写单元名称" @change="renameUnit(row)" />
                 </template>
               </el-table-column>
-              <el-table-column width="90" fixed="right">
+              <el-table-column label="操作" :width="widths['操作'] || 90" fixed="right">
                 <template #default="{ row }">
                   <el-button size="small" type="danger" text @click="delUnit(row)">删除</el-button>
                 </template>
@@ -116,6 +116,10 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api, errMsg, confirmDelete } from '../api'
+import { useColWidths } from '../utils'
+
+// 列宽记忆
+const { widths, onDragend } = useColWidths('subjectDetail')
 
 const route = useRoute()
 const subject = ref(null)

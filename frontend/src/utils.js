@@ -1,3 +1,20 @@
+import { reactive } from 'vue'
+
+// ---------- 表格列宽记忆 ----------
+// 列表拖动列宽后按 tableKey + 列标识（prop 或 label）存 localStorage，刷新/重开仍生效
+export function useColWidths(tableKey) {
+  const key = 'colwidths:' + tableKey
+  const widths = reactive(JSON.parse(localStorage.getItem(key) || '{}'))
+  // 绑定到 el-table 的 header-dragend 事件：拖动结束即持久化
+  function onDragend(newWidth, _oldWidth, col) {
+    const id = col.property || col.label
+    if (!id) return
+    widths[id] = Math.round(newWidth)
+    localStorage.setItem(key, JSON.stringify(widths))
+  }
+  return { widths, onDragend }
+}
+
 export const gradeLabel = (n) => (n ? `${n}年级` : '')
 
 // 按记录日期推算当时读的年级（8月起算新学年）；无入学年份返回 null

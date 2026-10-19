@@ -22,30 +22,30 @@
       <el-card shadow="never" style="margin-top: 16px">
         <template #header><span>绑定的班级</span></template>
         <el-empty v-if="!classRows.length" description="还没有绑定班级，去「设置 → 班级管理」新建并归属到该孩子" :image-size="70" />
-        <el-table v-else :data="classRows" size="small">
-          <el-table-column label="学校" min-width="140">
+        <el-table v-else :data="classRows" size="small" border @header-dragend="onDragend">
+          <el-table-column label="学校" :width="widths['学校']" :min-width="widths['学校'] || 140">
             <template #default="{ row }">{{ row.school || '—' }}</template>
           </el-table-column>
-          <el-table-column label="阶段" width="80">
+          <el-table-column label="阶段" :width="widths['阶段'] || 80">
             <template #default="{ row }">{{ row.stage }}</template>
           </el-table-column>
-          <el-table-column label="年级" width="130">
+          <el-table-column label="年级" :width="widths['年级'] || 130">
             <template #default="{ row }">
               <span v-if="row.grade">{{ gradeLabel(row.grade) }}</span>
               <span v-else-if="row.graduated" class="graduated">已毕业（{{ classGraduateYear(row.stage, row.enroll_year) }}级）</span>
               <span v-else>—</span>
             </template>
           </el-table-column>
-          <el-table-column label="班级" width="90">
+          <el-table-column label="班级" :width="widths['班级'] || 90">
             <template #default="{ row }">{{ row.name || '—' }}</template>
           </el-table-column>
-          <el-table-column label="学号" width="90">
+          <el-table-column label="学号" :width="widths['学号'] || 90">
             <template #default="{ row }">{{ row.student_no || '—' }}</template>
           </el-table-column>
-          <el-table-column label="入学时间" width="90">
+          <el-table-column label="入学时间" :width="widths['入学时间'] || 90">
             <template #default="{ row }">{{ row.enroll_year || '—' }}</template>
           </el-table-column>
-          <el-table-column width="110" fixed="right">
+          <el-table-column label="操作" :width="widths['操作'] || 110" fixed="right">
             <template #default="{ row }">
               <el-button size="small" type="primary" text @click="$router.push(`/class/${row.id}`)">班级详情</el-button>
             </template>
@@ -94,7 +94,10 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { api, errMsg } from '../api'
-import { classGraduateYear, gradeLabel } from '../utils'
+import { classGraduateYear, gradeLabel, useColWidths } from '../utils'
+
+// 列宽记忆
+const { widths, onDragend } = useColWidths('childDetail')
 
 const route = useRoute()
 const child = ref(null)

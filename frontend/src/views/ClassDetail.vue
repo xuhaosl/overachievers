@@ -31,14 +31,14 @@
       <!-- 主要竞争对手：单独管理 -->
       <el-card shadow="never" style="margin-top: 16px">
         <template #header><span>主要竞争对手</span></template>
-        <el-table :data="rivalRows" size="small" empty-text="还没有添加竞争对手">
-          <el-table-column label="学号" width="120">
+        <el-table :data="rivalRows" size="small" border @header-dragend="onDragend" empty-text="还没有添加竞争对手">
+          <el-table-column label="学号" :width="widths['学号'] || 120">
             <template #default="{ row }">{{ row.no || '—' }}</template>
           </el-table-column>
-          <el-table-column label="姓名" min-width="160">
+          <el-table-column label="姓名" :width="widths['姓名']" :min-width="widths['姓名'] || 160">
             <template #default="{ row }">{{ row.name || '—' }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="80">
+          <el-table-column label="操作" :width="widths['操作'] || 80">
             <template #default="{ $index }">
               <el-button size="small" type="danger" text @click="removeRival($index)">删除</el-button>
             </template>
@@ -61,7 +61,10 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { api, errMsg } from '../api'
-import { classGraduateYear, gradeLabel } from '../utils'
+import { classGraduateYear, gradeLabel, useColWidths } from '../utils'
+
+// 列宽记忆
+const { widths, onDragend } = useColWidths('classDetail')
 import ClassEditDialog from '../components/ClassEditDialog.vue'
 
 const route = useRoute()

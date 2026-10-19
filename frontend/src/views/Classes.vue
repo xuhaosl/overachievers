@@ -8,24 +8,24 @@
       班级 = 孩子的就读经历：归属、阶段、入学时间等信息在这里录入，孩子管理里的学校/年级/学号等自动按时间推算提取；点击任意一行可查看班级详情
     </p>
 
-    <el-table :data="list" v-loading="loading" @row-click="goDetail" class="clickable">
-      <el-table-column prop="child_name" label="归属孩子" width="110" sortable />
-      <el-table-column prop="school" label="学校" min-width="140" sortable />
-      <el-table-column prop="stage" label="阶段" width="80" sortable />
-      <el-table-column prop="grade" label="年级" width="140" sortable>
+    <el-table :data="list" v-loading="loading" border @header-dragend="onDragend" @row-click="goDetail" class="clickable">
+      <el-table-column prop="child_name" label="归属孩子" :width="widths.child_name || 110" sortable />
+      <el-table-column prop="school" label="学校" :width="widths.school" :min-width="widths.school || 140" sortable />
+      <el-table-column prop="stage" label="阶段" :width="widths.stage || 80" sortable />
+      <el-table-column prop="grade" label="年级" :width="widths.grade || 140" sortable>
         <template #default="{ row }">
           <span v-if="row.grade">{{ gradeLabel(row.grade) }}</span>
           <span v-else-if="row.graduated" class="graduated">已毕业（{{ classGraduateYear(row.stage, row.enroll_year) }}级）</span>
           <span v-else>—</span>
         </template>
       </el-table-column>
-      <el-table-column prop="name" label="班级" width="100" sortable>
+      <el-table-column prop="name" label="班级" :width="widths.name || 100" sortable>
         <template #default="{ row }">{{ row.name || '—' }}</template>
       </el-table-column>
-      <el-table-column prop="student_no" label="学号" width="100" sortable>
+      <el-table-column prop="student_no" label="学号" :width="widths.student_no || 100" sortable>
         <template #default="{ row }">{{ row.student_no || '—' }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="130" fixed="right">
+      <el-table-column label="操作" :width="widths['操作'] || 130" fixed="right">
         <template #default="{ row }">
           <el-button size="small" type="primary" text @click.stop="editRow = row; dialog = true">编辑</el-button>
           <el-button size="small" type="danger" text @click.stop="del(row)">删除</el-button>
@@ -42,7 +42,10 @@ import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api, errMsg } from '../api'
-import { classGraduateYear, gradeLabel } from '../utils'
+import { classGraduateYear, gradeLabel, useColWidths } from '../utils'
+
+// 列宽记忆
+const { widths, onDragend } = useColWidths('classes')
 import ClassEditDialog from '../components/ClassEditDialog.vue'
 
 const router = useRouter()

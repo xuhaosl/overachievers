@@ -6,31 +6,31 @@
     </div>
     <p class="hint">孩子的学校/年级/班级/学号等信息从「班级管理」里归属的班级自动提取（按时间推算），此处只维护姓名、首次入学时间、备注</p>
 
-    <el-table :data="list" v-loading="loading" @row-click="goDetail" class="clickable">
-      <el-table-column prop="name" label="姓名" width="110" sortable />
-      <el-table-column prop="school" label="学校" min-width="140" sortable>
+    <el-table :data="list" v-loading="loading" border @header-dragend="onDragend" @row-click="goDetail" class="clickable">
+      <el-table-column prop="name" label="姓名" :width="widths.name || 110" sortable />
+      <el-table-column prop="school" label="学校" :width="widths.school" :min-width="widths.school || 140" sortable>
         <template #default="{ row }">{{ row.school || '-' }}</template>
       </el-table-column>
-      <el-table-column prop="stage" label="阶段" width="80" sortable>
+      <el-table-column prop="stage" label="阶段" :width="widths.stage || 80" sortable>
         <template #default="{ row }">{{ row.stage || '-' }}</template>
       </el-table-column>
-      <el-table-column prop="grade" label="年级" width="90" sortable>
+      <el-table-column prop="grade" label="年级" :width="widths.grade || 90" sortable>
         <template #default="{ row }">{{ gradeLabel(row.grade) || '-' }}</template>
       </el-table-column>
-      <el-table-column prop="class_name" label="班级" width="90" sortable>
+      <el-table-column prop="class_name" label="班级" :width="widths.class_name || 90" sortable>
         <template #default="{ row }">{{ row.class_name || '-' }}</template>
       </el-table-column>
-      <el-table-column prop="student_no" label="学号" width="90" sortable>
+      <el-table-column prop="student_no" label="学号" :width="widths.student_no || 90" sortable>
         <template #default="{ row }">{{ row.student_no || '-' }}</template>
       </el-table-column>
-      <el-table-column prop="score_count" label="成绩数" width="90" sortable>
+      <el-table-column prop="score_count" label="成绩数" :width="widths.score_count || 90" sortable>
         <template #default="{ row }">
           <el-link type="primary" :underline="false" @click.stop="$router.push({ path: '/list', query: { tab: 'single', child_id: row.id } })">
             {{ row.score_count }}
           </el-link>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="150" fixed="right">
+      <el-table-column label="操作" :width="widths['操作'] || 150" fixed="right">
         <template #default="{ row }">
           <el-button size="small" type="primary" text @click.stop="openEdit(row)">编辑</el-button>
           <el-button size="small" type="danger" text @click.stop="del(row)">删除</el-button>
@@ -78,7 +78,10 @@ import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { api, errMsg, confirmDelete } from '../api'
-import { gradeLabel } from '../utils'
+import { gradeLabel, useColWidths } from '../utils'
+
+// 列宽记忆
+const { widths, onDragend } = useColWidths('children')
 import { store } from '../store'
 
 const router = useRouter()

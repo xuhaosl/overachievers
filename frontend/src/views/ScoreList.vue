@@ -49,41 +49,42 @@
           </el-form-item>
         </el-form>
 
-        <el-table :data="pagedList" v-loading="loading" size="small" @row-click="(row) => $router.push(`/score/${row.id}`)" style="cursor: pointer">
-          <el-table-column prop="starred" label="☆" width="50" sortable :sort-method="(a, b) => (b.starred ? 1 : 0) - (a.starred ? 1 : 0)">
+        <el-table :data="pagedList" v-loading="loading" size="small" border @header-dragend="sd" @row-click="(row) => $router.push(`/score/${row.id}`)" style="cursor: pointer">
+          <el-table-column prop="starred" label="☆" :width="sw.starred || 50" sortable :sort-method="(a, b) => (b.starred ? 1 : 0) - (a.starred ? 1 : 0)">
             <template #default="{ row }">
               <span :class="row.starred ? 'star-on' : 'star-off'" title="加星/取消星" @click.stop="toggleStar(row, 'score')">{{ row.starred ? '★' : '☆' }}</span>
             </template>
           </el-table-column>
-          <el-table-column prop="date" label="日期" width="105" sortable />
-          <el-table-column prop="subject_name" label="学科" width="90" sortable>
+          <el-table-column prop="date" label="日期" :width="sw.date || 105" sortable />
+          <el-table-column prop="subject_name" label="学科" :width="sw.subject_name || 90" sortable>
             <template #default="{ row }">
               <span class="color-dot" :style="{ background: row.subject_color }" />{{ row.subject_name }}
             </template>
           </el-table-column>
-          <el-table-column prop="type" label="类型" min-width="95" sortable />
-          <el-table-column prop="grade" label="年级" min-width="75" sortable :sort-method="(a, b) => (a.grade || 0) - (b.grade || 0)">
+          <el-table-column prop="type" label="类型" :width="sw.type" :min-width="sw.type || 95" sortable />
+          <el-table-column prop="grade" label="年级" :width="sw.grade" :min-width="sw.grade || 75" sortable :sort-method="(a, b) => (a.grade || 0) - (b.grade || 0)">
             <template #default="{ row }">{{ gradeLabel(row.grade) }}</template>
           </el-table-column>
-          <el-table-column prop="term" label="学期" min-width="85" sortable>
+          <el-table-column prop="term" label="学期" :width="sw.term" :min-width="sw.term || 85" sortable>
             <template #default="{ row }">{{ shortTerm(row.term) }}</template>
           </el-table-column>
           <el-table-column
             prop="unit_names"
             label="单元"
-            min-width="100"
+            :width="sw.unit_names"
+            :min-width="sw.unit_names || 100"
             sortable
             :sort-method="(a, b) => (a.exam_name || a.unit_names || '').localeCompare(b.exam_name || b.unit_names || '', 'zh')"
           >
             <template #default="{ row }">{{ row.exam_name || row.unit_names || '-' }}</template>
           </el-table-column>
-          <el-table-column prop="regular_score" label="得分" width="85" sortable :sort-method="(a, b) => ((a.regular_score || 0) + (a.bonus_score || 0)) - ((b.regular_score || 0) + (b.bonus_score || 0))">
+          <el-table-column prop="regular_score" label="得分" :width="sw.regular_score || 85" sortable :sort-method="(a, b) => ((a.regular_score || 0) + (a.bonus_score || 0)) - ((b.regular_score || 0) + (b.bonus_score || 0))">
             <template #default="{ row }">{{ earnedLabel(row) }}</template>
           </el-table-column>
-          <el-table-column prop="class_rank" label="名次" width="65" sortable :sort-method="(a, b) => rankNum(a.class_rank ?? Infinity) - rankNum(b.class_rank ?? Infinity)">
+          <el-table-column prop="class_rank" label="名次" :width="sw.class_rank || 65" sortable :sort-method="(a, b) => rankNum(a.class_rank ?? Infinity) - rankNum(b.class_rank ?? Infinity)">
             <template #default="{ row }">{{ row.class_rank ?? '-' }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="125">
+          <el-table-column label="操作" :width="sw['操作'] || 125">
             <template #default="{ row }">
               <el-button size="small" type="primary" text @click.stop="openEdit(row)">编辑</el-button>
               <el-button size="small" type="danger" text @click.stop="del(row)">删除</el-button>
@@ -145,30 +146,30 @@
           </el-form-item>
         </el-form>
 
-        <el-table :data="pagedExams" v-loading="examLoading" size="small" @row-click="(row) => $router.push(`/exam/${row.id}`)" style="cursor: pointer">
-          <el-table-column prop="starred" label="☆" width="50" sortable :sort-method="(a, b) => (b.starred ? 1 : 0) - (a.starred ? 1 : 0)">
+        <el-table :data="pagedExams" v-loading="examLoading" size="small" border @header-dragend="ed" @row-click="(row) => $router.push(`/exam/${row.id}`)" style="cursor: pointer">
+          <el-table-column prop="starred" label="☆" :width="ew.starred || 50" sortable :sort-method="(a, b) => (b.starred ? 1 : 0) - (a.starred ? 1 : 0)">
             <template #default="{ row }">
               <span :class="row.starred ? 'star-on' : 'star-off'" title="加星/取消星" @click.stop="toggleStar(row, 'exam')">{{ row.starred ? '★' : '☆' }}</span>
             </template>
           </el-table-column>
-          <el-table-column prop="date" label="日期" width="105" sortable />
-          <el-table-column prop="name" label="场次名称" width="150" sortable />
-          <el-table-column prop="type" label="类型" min-width="100" sortable />
-          <el-table-column prop="grade" label="年级" min-width="80" sortable :sort-method="(a, b) => (a.grade || 0) - (b.grade || 0)">
+          <el-table-column prop="date" label="日期" :width="ew.date || 105" sortable />
+          <el-table-column prop="name" label="场次名称" :width="ew.name || 150" sortable />
+          <el-table-column prop="type" label="类型" :width="ew.type" :min-width="ew.type || 100" sortable />
+          <el-table-column prop="grade" label="年级" :width="ew.grade" :min-width="ew.grade || 80" sortable :sort-method="(a, b) => (a.grade || 0) - (b.grade || 0)">
             <template #default="{ row }">{{ gradeLabel(row.grade) }}</template>
           </el-table-column>
-          <el-table-column prop="term" label="学期" min-width="85" sortable>
+          <el-table-column prop="term" label="学期" :width="ew.term" :min-width="ew.term || 85" sortable>
             <template #default="{ row }">{{ shortTerm(row.term) }}</template>
           </el-table-column>
-          <el-table-column label="总分" min-width="100" sortable :sort-method="(a, b) => (b.rate ?? 0) - (a.rate ?? 0)">
+          <el-table-column label="总分" :width="ew['总分']" :min-width="ew['总分'] || 100" sortable :sort-method="(a, b) => (b.rate ?? 0) - (a.rate ?? 0)">
             <template #default="{ row }">
               {{ row.bonus_earned ? `${row.regular_earned}（${row.bonus_earned}）` : row.regular_earned }}
             </template>
           </el-table-column>
-          <el-table-column prop="class_rank" label="名次" min-width="70" sortable :sort-method="(a, b) => rankNum(a.class_rank ?? Infinity) - rankNum(b.class_rank ?? Infinity)">
+          <el-table-column prop="class_rank" label="名次" :width="ew.class_rank" :min-width="ew.class_rank || 70" sortable :sort-method="(a, b) => rankNum(a.class_rank ?? Infinity) - rankNum(b.class_rank ?? Infinity)">
             <template #default="{ row }">{{ row.class_rank ?? '-' }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="125">
+          <el-table-column label="操作" :width="ew['操作'] || 125">
             <template #default="{ row }">
               <el-button size="small" type="primary" text @click.stop="openExamEdit(row)">编辑</el-button>
               <el-button size="small" type="danger" text @click.stop="delExam(row)">删除</el-button>
@@ -199,9 +200,13 @@ import { Search } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api, errMsg } from '../api'
 import { store } from '../store'
-import { earnedLabel, examTypes, gradeLabel, rankNum, shortTerm } from '../utils'
+import { earnedLabel, examTypes, gradeLabel, rankNum, shortTerm, useColWidths } from '../utils'
 import ScoreEditDialog from '../components/ScoreEditDialog.vue'
 import ExamEditDialog from '../components/ExamEditDialog.vue'
+
+// 列宽记忆：单科成绩表 / 考试场次表各自独立持久化
+const { widths: sw, onDragend: sd } = useColWidths('scoreList')
+const { widths: ew, onDragend: ed } = useColWidths('examList')
 
 const route = useRoute()
 const router = useRouter()

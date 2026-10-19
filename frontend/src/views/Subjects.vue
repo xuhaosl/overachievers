@@ -6,20 +6,20 @@
     </div>
     <p class="hint">点击学科行进入学科详情，可在详情页按学期管理单元（课程）</p>
 
-    <el-table :data="list" v-loading="loading" @row-click="goDetail" class="clickable">
-      <el-table-column label="颜色" width="80">
+    <el-table :data="list" v-loading="loading" border @header-dragend="onDragend" @row-click="goDetail" class="clickable">
+      <el-table-column label="颜色" :width="widths['颜色'] || 80">
         <template #default="{ row }">
           <span class="color-dot" :style="{ background: row.color }" />
         </template>
       </el-table-column>
-      <el-table-column prop="name" label="学科" min-width="110" sortable />
-      <el-table-column prop="version" label="主要版本" min-width="110" sortable>
+      <el-table-column prop="name" label="学科" :width="widths.name" :min-width="widths.name || 110" sortable />
+      <el-table-column prop="version" label="主要版本" :width="widths.version" :min-width="widths.version || 110" sortable>
         <template #default="{ row }">{{ row.version || '—' }}</template>
       </el-table-column>
-      <el-table-column prop="child_name" label="归属孩子" min-width="110" sortable>
+      <el-table-column prop="child_name" label="归属孩子" :width="widths.child_name" :min-width="widths.child_name || 110" sortable>
         <template #default="{ row }">{{ row.child_name || '—' }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="210" fixed="right">
+      <el-table-column label="操作" :width="widths['操作'] || 210" fixed="right">
         <template #default="{ row }">
           <el-button size="small" type="primary" text @click.stop="openEdit(row)">编辑</el-button>
           <el-button size="small" text @click.stop="openCopy(row)">复制</el-button>
@@ -105,6 +105,10 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { api, errMsg, confirmDelete } from '../api'
+import { useColWidths } from '../utils'
+
+// 列宽记忆
+const { widths, onDragend } = useColWidths('subjects')
 
 const router = useRouter()
 const list = ref([])

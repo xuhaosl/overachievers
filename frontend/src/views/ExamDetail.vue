@@ -81,33 +81,33 @@
           style="margin-bottom: 12px"
         />
         <el-empty v-if="!exam.scores.length" description="还没有成绩，从右上角拉取「录一条」里的成绩" :image-size="80" />
-        <el-table v-else :data="exam.scores" size="small">
-          <el-table-column label="日期" width="105">
+        <el-table v-else :data="exam.scores" size="small" border @header-dragend="onDragend">
+          <el-table-column label="日期" :width="widths['日期'] || 105">
             <template #default="{ row }">{{ row.date }}</template>
           </el-table-column>
-          <el-table-column label="学科" width="85">
+          <el-table-column label="学科" :width="widths['学科'] || 85">
             <template #default="{ row }">
               <span class="color-dot" :style="{ background: row.subject_color }" />{{ row.subject_name }}
             </template>
           </el-table-column>
-          <el-table-column label="成绩" min-width="100">
+          <el-table-column label="成绩" :width="widths['成绩']" :min-width="widths['成绩'] || 100">
             <template #default="{ row }">
               {{ displayScore(row) }} / {{ displayTotal(row) }}
             </template>
           </el-table-column>
-          <el-table-column label="得分率" width="90">
+          <el-table-column label="得分率" :width="widths['得分率'] || 90">
             <template #default="{ row }">{{ ratePercent(row.rate) }}</template>
           </el-table-column>
-          <el-table-column label="年级名次" width="90">
+          <el-table-column label="年级名次" :width="widths['年级名次'] || 90">
             <template #default="{ row }">{{ rankText(row.grade_rank) }}</template>
           </el-table-column>
-          <el-table-column label="班级名次" width="90">
+          <el-table-column label="班级名次" :width="widths['班级名次'] || 90">
             <template #default="{ row }">{{ rankText(row.class_rank) }}</template>
           </el-table-column>
-          <el-table-column label="备注" min-width="120">
+          <el-table-column label="备注" :width="widths['备注']" :min-width="widths['备注'] || 120">
             <template #default="{ row }">{{ row.note || '—' }}</template>
           </el-table-column>
-          <el-table-column width="130" fixed="right">
+          <el-table-column label="操作" :width="widths['操作'] || 130" fixed="right">
             <template #default="{ row }">
               <el-button size="small" type="primary" text @click="$router.push(`/score/${row.id}`)">详情</el-button>
               <el-button size="small" type="danger" text @click="detachScore(row)">移出</el-button>
@@ -127,8 +127,11 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { api, errMsg } from '../api'
-import { earnedLabel, ratePercent, rankText } from '../utils'
+import { earnedLabel, ratePercent, rankText, useColWidths } from '../utils'
 import ExamEditDialog from '../components/ExamEditDialog.vue'
+
+// 列宽记忆
+const { widths, onDragend } = useColWidths('examDetail')
 
 const route = useRoute()
 const router = useRouter()
