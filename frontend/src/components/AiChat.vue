@@ -259,6 +259,10 @@ async function loadBase() {
     const [c, s] = await Promise.all([api.get('/children'), api.get('/subjects')])
     children.value = c.data
     subjects.value = s.data
+    // 未选孩子时默认聚焦第一个（可手动清除，清除后后端会带全部孩子数据）
+    if (!scope.value.child_id && children.value.length) {
+      scope.value.child_id = children.value[0].id
+    }
   }
 }
 

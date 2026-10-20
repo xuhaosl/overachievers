@@ -275,60 +275,82 @@ def _fmt_exam_row(e: Exam, scores: list[Score]) -> str:
     return "\n".join(lines)
 
 
+def _child_full_rows(db: Session, child_id: int) -> list[str]:
+    """某孩子全部成绩行：场次汇总 + 独立成绩，按时间排序。"""
+    all_scores = db.scalars(
+        select(Score).where(Score.child_id == child_id).order_by(Score.date, Score.id).limit(120)
+    ).all()
+    exams = db.scalars(select(Exam).where(Exam.child_id == child_id).order_by(Exam.date).limit(50)).all()
+    extra = []
+    for e in exams:
+        es = [s for s in all_scores if s.exam_id == e.id]
+        extra.append(_fmt_exam_row(e, es) if es else None)
+    extra.extend(_fmt_score_row(s) for s in all_scores if not s.exam_id)
+    return [x for x in extra if x]
+
+
 def build_context(db: Session, scope: dict) -> str:
-    """按数据范围组装成绩文本；范围内数据太少时自动附加全历史概览，供 AI 做跨学期对比。"""
-    lines: list[str] = []
-    child = db.get(Child, scope.get("child_id")) if scope.get("child_id") else None
+    """按数据范围组装成绩文本。核心兜底：未选孩子时自动带全部孩子的完整数据；
+    范围内明细太少（≤5 条）时附加该孩子全历史，供 AI 做跨学期/趋势对比。"""
+    child_id = scope.get("child_id")
     exam_id = scope.get("exam_id")
     subject_id = scope.get("subject_id")
     date_from = scope.get("date_from") or ""
     date_to = scope.get("date_to") or ""
+    has_filter = bool(child_id or exam_id or subject_id or date_from or date_to)
 
-    if exam_id:
-        e = db.get(Exam, exam_id)
-        if e:
-            scores = db.scalars(select(Score).where(Score.exam_id == exam_id).order_by(Score.id)).all()
-            lines.append(_fmt_exam_row(e, scores))
-    else:
-        q = select(Score).where(Score.child_id == (child.id if child else scope.get("child_id")))
-        if subject_id:
-            q = q.where(Score.subject_id == subject_id)
-        if date_from:
-            q = q.where(Score.date >= date_from)
-        if date_to:
-            q = q.where(Score.date <= date_to)
-        rows = db.scalars(q.order_by(Score.date, Score.id).limit(100)).all()
-        lines = [_fmt_score_row(s) for s in rows]
+    children = ([db.get(Child, child_id)] if child_id else db.scalars(select(Child)).all())
+    children = [c for c in children if c]
+    if not children:
+        return "系统中还没有录入任何孩子。"
 
-    head = f"以下是孩子「{child.name}」的成绩数据（{len(lines)} 条）：\n" if child else f"成绩数据（{len(lines)} 条）：\n"
-    out = head + "\n".join(lines)
+    blocks = []
+    for child in children:
+        lines: list[str] = []
+        if exam_id:
+            e = db.get(Exam, exam_id)
+            if e and e.child_id == child.id:
+                scores = db.scalars(select(Score).where(Score.exam_id == exam_id).order_by(Score.id)).all()
+                lines.append(_fmt_exam_row(e, scores))
+        else:
+            q = select(Score).where(Score.child_id == child.id)
+            if subject_id:
+                q = q.where(Score.subject_id == subject_id)
+            if date_from:
+                q = q.where(Score.date >= date_from)
+            if date_to:
+                q = q.where(Score.date <= date_to)
+            lines = [_fmt_score_row(s) for s in db.scalars(q.order_by(Score.date, Score.id).limit(100)).all()]
 
-    # 范围内明细太少（≤5 条）时补充全历史概览：AI 才能回答"和之前比有没有进步"这类问题
-    if child and len(lines) <= 5:
-        all_scores = db.scalars(
-            select(Score).where(Score.child_id == child.id).order_by(Score.date, Score.id).limit(120)
-        ).all()
-        extra = []
-        exams = db.scalars(select(Exam).where(Exam.child_id == child.id).order_by(Exam.date).limit(50)).all()
-        for e in exams:
-            es = [s for s in all_scores if s.exam_id == e.id]
-            extra.append(_fmt_exam_row(e, es) if es else None)
-        solo = [s for s in all_scores if not s.exam_id]
-        extra.extend(_fmt_score_row(s) for s in solo)
-        extra = [x for x in extra if x]
-        if len(extra) > len(lines):
-            out += (
-                f"\n\n【全历史成绩概览】（该孩子全部 {len(extra)} 条记录，用于跨学期/趋势对比）：\n"
-                + "\n".join(extra)
-            )
-    return out
+        full = None if exam_id else _child_full_rows(db, child.id)
+        # 未选孩子（家长可能问任一学期/科目）或范围内明细太少 → 都必须给全历史
+        need_full = (not child_id) or (full and len(lines) <= 5)
+
+        if full and need_full and len(full) > len(lines):
+            if lines and has_filter:
+                blocks.append(
+                    f"【孩子「{child.name}」·当前范围明细】（{len(lines)} 条）：\n" + "\n".join(lines)
+                    + f"\n【孩子「{child.name}」·全历史成绩概览】（全部 {len(full)} 条，每条带学期/日期，可据此理解\"本学期\"等说法）：\n"
+                    + "\n".join(full)
+                )
+            else:
+                blocks.append(
+                    f"【孩子「{child.name}」成绩】（全部 {len(full)} 条，每条带学期/日期，可据此理解\"本学期/上学期\"等说法）：\n"
+                    + "\n".join(full)
+                )
+        else:
+            body = "\n".join(lines) if lines else "（该范围内无成绩记录）"
+            blocks.append(f"【孩子「{child.name}」成绩】（{len(lines)} 条）：\n" + body)
+    return "\n\n".join(blocks)
 
 
 SYSTEM_PROMPT = (
     "你是一个小学生的家长配置的成绩分析助手，熟悉中国中小学教育。"
     "用户会提供孩子的成绩数据，请基于数据回答：可做趋势分析、诊断强弱科、给出具体可执行的学习建议。"
-    "数据可能分两部分：指定范围内的明细 + 全历史成绩概览。当用户问趋势、进步、对比类问题时，"
-    "务必结合全历史概览一起分析，而不是只盯着明细范围说数据不足。"
+    "数据可能分块：当前范围明细 + 全历史成绩概览，每条记录都带「学期」和「日期」。"
+    "当用户问趋势、进步、对比类问题时，务必结合全历史概览一起分析，而不是只盯着明细范围说数据不足；"
+    "当用户说\"本学期/上学期/最近\"等时间词时，根据记录里的学期和日期自行划定范围再分析。"
+    "数据按孩子分块给出，未指定孩子时对所有孩子的数据综合分析。"
     "回答要求：使用简体中文；直接给结论和建议，不要复述问题、不要客套；篇幅尽量精炼（一般 200 字以内，"
     "用户明确要求详细分析时才展开）；可用少量短列表和加粗突出重点，不要堆砌标题和嵌套结构；数据不足时如实说明。"
     "当用户要求为某条成绩/某场考试写评语时，用一段 50 字以内、鼓励为主且指出改进方向的评语，"
