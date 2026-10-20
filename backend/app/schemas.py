@@ -165,6 +165,7 @@ class ExamOut(ORMModel):
     high_score: float | None = None
     high_scorer: str = ""
     note: str
+    ai_comment: str = ""
     created_at: datetime
 
 
@@ -225,6 +226,7 @@ class ScoreOut(ORMModel):
     high_score: float | None = None
     high_scorer: str = ""
     note: str
+    ai_comment: str = ""
     # 关联展示字段
     child_name: str = ""
     subject_name: str = ""
@@ -245,6 +247,10 @@ class ScoreIds(BaseModel):
 
 class StarIn(BaseModel):
     starred: bool
+
+
+class AiCommentIn(BaseModel):
+    content: str
 
 
 # ---------- 统计 ----------

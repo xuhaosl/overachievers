@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session, joinedload
 from ..auth import AuthDep
 from ..database import get_db
 from ..models import Child, Exam, SchoolClass, Score, rank_num, rival_names
-from ..schemas import ExamDetail, ExamIn, ExamSummary, StarIn
+from ..schemas import AiCommentIn, ExamDetail, ExamIn, ExamSummary, StarIn
 from ..term import grade_at_date, infer_term, resolve_stage_grade, short_term_from_long
 
 router = APIRouter(prefix="/exams", tags=["exams"], dependencies=[AuthDep])
@@ -149,6 +149,17 @@ def set_exam_star(exam_id: int, body: StarIn, db: Session = Depends(get_db)):
     exam.starred = body.starred
     db.commit()
     return {"ok": True, "starred": exam.starred}
+
+
+@router.patch("/{exam_id}/ai-comment")
+def set_exam_ai_comment(exam_id: int, body: AiCommentIn, db: Session = Depends(get_db)):
+    """AI 评语写入/清除（content 传空即清除）。"""
+    exam = db.get(Exam, exam_id)
+    if not exam:
+        raise HTTPException(404, "考试场次不存在")
+    exam.ai_comment = body.content.strip()[:2000]
+    db.commit()
+    return {"ok": True, "ai_comment": exam.ai_comment}
 
 
 @router.delete("/{exam_id}")

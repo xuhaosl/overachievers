@@ -11,6 +11,7 @@ import ClassDetail from './views/ClassDetail.vue'
 import ChildDetail from './views/ChildDetail.vue'
 import ExamDetail from './views/ExamDetail.vue'
 import Backup from './views/Backup.vue'
+import AiBots from './views/AiBots.vue'
 import Login from './views/Login.vue'
 
 export default createRouter({
@@ -26,6 +27,7 @@ export default createRouter({
     { path: '/subject/:id', component: SubjectDetail, meta: { hidden: true } },
     { path: '/classes', component: Classes, meta: { title: '班级管理', icon: 'OfficeBuilding', group: '设置' } },
     { path: '/backup', component: Backup, meta: { title: '数据备份', icon: 'Download', group: '设置' } },
+    { path: '/ai-bots', component: AiBots, meta: { title: '智能助手', icon: 'ChatDotRound', group: '设置' } },
     { path: '/class/:id', component: ClassDetail, meta: { hidden: true } },
     { path: '/child/:id', component: ChildDetail, meta: { hidden: true } },
     { path: '/login', component: Login, meta: { title: '登录', hidden: true } },

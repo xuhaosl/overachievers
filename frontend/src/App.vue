@@ -19,6 +19,7 @@
     <el-main>
       <router-view />
     </el-main>
+    <AiChat ref="aiChat" v-model="aiVisible" />
   </el-container>
 </template>
 
@@ -28,11 +29,22 @@ import { useRouter } from 'vue-router'
 import { Menu } from '@element-plus/icons-vue'
 import { api } from './api'
 import SideMenu from './SideMenu.vue'
+import AiChat from './components/AiChat.vue'
 
 const ready = ref(false)
 const isMobile = ref(window.innerWidth < 768)
 const drawer = ref(false)
 const router = useRouter()
+const aiVisible = ref(false)
+const aiChat = ref(null)
+
+// 详情页呼出 AI 侧栏：this.$root.$openAi(scope) 或 inject('aiOpen')
+function openAi(scope) {
+  aiChat.value?.open(scope || {})
+}
+window.$openAi = openAi
+import { provide } from 'vue'
+provide('aiOpen', openAi)
 
 const onResize = () => (isMobile.value = window.innerWidth < 768)
 onMounted(async () => {

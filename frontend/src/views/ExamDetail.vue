@@ -11,6 +11,7 @@
           <template #extra>
             <el-button :disabled="!prevId" @click="go(prevId)">上一个</el-button>
             <el-button :disabled="!nextId" @click="go(nextId)">下一个</el-button>
+            <el-button type="success" plain :icon="ChatDotRound" @click="askAi">问 AI</el-button>
             <el-button type="primary" @click="showEdit = true">编辑</el-button>
           </template>
         </el-page-header>
@@ -45,6 +46,15 @@
           </el-descriptions-item>
           <el-descriptions-item label="标签">{{ exam.tags || '—' }}</el-descriptions-item>
           <el-descriptions-item label="备注" :span="2">{{ exam.note || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="AI 评语" :span="3">
+            <template v-if="exam.ai_comment">
+              <span>{{ exam.ai_comment }}</span>
+              <el-button size="small" text type="danger" style="margin-left: 8px" @click="clearAiComment">
+                清除
+              </el-button>
+            </template>
+            <template v-else>—</template>
+          </el-descriptions-item>
         </el-descriptions>
       </el-card>
 
@@ -123,9 +133,10 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { ChatDotRound } from '@element-plus/icons-vue'
 import { api, errMsg } from '../api'
 import { earnedLabel, ratePercent, rankText, useColWidths } from '../utils'
 import ExamEditDialog from '../components/ExamEditDialog.vue'
@@ -166,6 +177,33 @@ async function toggleStar() {
     exam.value.starred = data.starred
   } catch (err) {
     ElMessage.error(errMsg(err))
+  }
+}
+
+// 呼出 AI 侧栏：预填当前场次为数据范围与评语目标
+function askAi() {
+  const v = exam.value
+  window.$openAi?.({
+    child_id: v.child_id,
+    exam_id: v.id,
+    focus: { type: 'exam', id: v.id, label: `${v.name || v.type} ${v.date}` },
+  })
+}
+
+// AI 侧栏写入评语后刷新显示
+function onAiComment(e) {
+  if (e.detail?.type === 'exam' && e.detail?.id === exam.value?.id) loadExam()
+}
+onMounted(() => window.addEventListener('ai-comment-updated', onAiComment))
+onUnmounted(() => window.removeEventListener('ai-comment-updated', onAiComment))
+
+async function clearAiComment() {
+  try {
+    await api.patch(`/exams/${exam.value.id}/ai-comment`, { content: '' })
+    exam.value.ai_comment = ''
+    ElMessage.success('已清除')
+  } catch (e) {
+    ElMessage.error(errMsg(e))
   }
 }
 

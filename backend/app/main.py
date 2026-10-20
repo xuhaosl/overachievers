@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from .database import Base, engine
 from .routers import auth as auth_router
 from .routers import backup, children, classes, exams, scores, stats, subjects, update
+from .routers import ai as ai_router
 
 # 首次启动自动建表
 Base.metadata.create_all(bind=engine)
@@ -37,6 +38,7 @@ def _migrate():
             "starred": "BOOLEAN DEFAULT 0",
             "high_score": "FLOAT",
             "high_scorer": "VARCHAR(50) DEFAULT ''",
+            "ai_comment": "VARCHAR(2000) DEFAULT ''",
         },
         "exams": {
             "tags": "VARCHAR(200) DEFAULT ''",
@@ -44,6 +46,7 @@ def _migrate():
             "high_score": "FLOAT",
             "high_scorer": "VARCHAR(50) DEFAULT ''",
             "year_rank": "INTEGER",  # 全科总排名（学年），手动录入
+            "ai_comment": "VARCHAR(2000) DEFAULT ''",
         },
     }
     with engine.begin() as conn:
@@ -291,6 +294,7 @@ app.include_router(scores.router, prefix="/api")
 app.include_router(stats.router, prefix="/api")
 app.include_router(backup.router, prefix="/api")
 app.include_router(update.router, prefix="/api")
+app.include_router(ai_router.router, prefix="/api")
 
 # 成绩图片目录（不存在则创建），通过 /uploads/<文件名> 访问
 UPLOAD_DIR = Path(__file__).resolve().parents[1] / "data" / "uploads"

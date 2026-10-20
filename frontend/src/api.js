@@ -46,3 +46,62 @@ export function ElMessageBoxConfirm(message) {
     cancelButtonText: '取消',
   })
 }
+
+// ---------- 智能助手 ----------
+export const aiApi = {
+  providers: () => api.get('/ai/providers'),
+  bots: () => api.get('/ai/bots'),
+  createBot: (data) => api.post('/ai/bots', data),
+  updateBot: (id, data) => api.patch(`/ai/bots/${id}`, data),
+  deleteBot: (id) => api.delete(`/ai/bots/${id}`),
+  testBot: (data) => api.post('/ai/bots/test', data),
+  messages: (botId) => api.get(`/ai/bots/${botId}/messages`),
+  clearMessages: (botId) => api.delete(`/ai/bots/${botId}/messages`),
+  deleteMessage: (id) => api.delete(`/ai/messages/${id}`),
+  setScoreComment: (scoreId, content) => api.patch(`/scores/${scoreId}/ai-comment`, { content }),
+  setExamComment: (examId, content) => api.patch(`/exams/${examId}/ai-comment`, { content }),
+}
+
+// 流式对话：POST /ai/chat，逐段回调 assistant 增量文本；ai_error 事件抛错
+export async function aiChatStream(body, onDelta) {
+  const res = await fetch('/api/ai/chat', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(localStorage.getItem('sa_token') ? { 'X-Auth-Token': localStorage.getItem('sa_token') } : {}),
+    },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    let detail = res.statusText
+    try {
+      detail = (await res.json()).detail || detail
+    } catch { /* ignore */ }
+    throw new Error(detail)
+  }
+  const reader = res.body.getReader()
+  const dec = new TextDecoder()
+  let buf = ''
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buf += dec.decode(value, { stream: true })
+    let idx
+    while ((idx = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, idx).trim()
+      buf = buf.slice(idx + 1)
+      if (!line.startsWith('data:')) continue
+      const data = line.slice(5).trim()
+      if (data === '[DONE]') return
+      try {
+        const obj = JSON.parse(data)
+        if (obj.ai_error) throw new Error(obj.ai_error)
+        const delta = obj.choices?.[0]?.delta?.content
+        if (delta) onDelta(delta)
+      } catch (e) {
+        if (e instanceof SyntaxError) continue // 半截 JSON，忽略
+        throw e
+      }
+    }
+  }
+}

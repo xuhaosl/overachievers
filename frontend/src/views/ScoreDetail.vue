@@ -12,6 +12,7 @@
           <template #extra>
             <el-button :disabled="!prevId" @click="go(prevId)">上一个</el-button>
             <el-button :disabled="!nextId" @click="go(nextId)">下一个</el-button>
+            <el-button type="success" plain :icon="ChatDotRound" @click="askAi">问 AI</el-button>
             <el-button type="primary" @click="showEdit = true">编辑</el-button>
           </template>
         </el-page-header>
@@ -64,6 +65,15 @@
           </el-descriptions-item>
           <el-descriptions-item label="标签">{{ s.tags || '—' }}</el-descriptions-item>
           <el-descriptions-item label="备注" :span="2">{{ s.note || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="AI 评语" :span="3">
+            <template v-if="s.ai_comment">
+              <span>{{ s.ai_comment }}</span>
+              <el-button size="small" text type="danger" style="margin-left: 8px" @click="clearAiComment">
+                清除
+              </el-button>
+            </template>
+            <template v-else>—</template>
+          </el-descriptions-item>
         </el-descriptions>
       </el-card>
 
@@ -108,9 +118,10 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { ChatDotRound } from '@element-plus/icons-vue'
 import { api, errMsg } from '../api'
 import { gradeLabel, ratePercent, rankText, shortTerm } from '../utils'
 import ScoreEditDialog from '../components/ScoreEditDialog.vue'
@@ -161,6 +172,35 @@ async function toggleStar() {
     s.value.starred = data.starred
   } catch (err) {
     ElMessage.error(errMsg(err))
+  }
+}
+
+// 呼出 AI 侧栏：预填当前成绩为数据范围与评语目标
+function askAi() {
+  const v = s.value
+  window.$openAi?.({
+    child_id: v.child_id,
+    subject_id: v.subject_id,
+    date_from: v.date,
+    date_to: v.date,
+    focus: { type: 'score', id: v.id, label: `${v.subject_name} ${v.date} ${v.regular_score}分` },
+  })
+}
+
+// AI 侧栏写入评语后刷新显示
+function onAiComment(e) {
+  if (e.detail?.type === 'score' && e.detail?.id === s.value?.id) load()
+}
+onMounted(() => window.addEventListener('ai-comment-updated', onAiComment))
+onUnmounted(() => window.removeEventListener('ai-comment-updated', onAiComment))
+
+async function clearAiComment() {
+  try {
+    await api.patch(`/scores/${s.value.id}/ai-comment`, { content: '' })
+    s.value.ai_comment = ''
+    ElMessage.success('已清除')
+  } catch (e) {
+    ElMessage.error(errMsg(e))
   }
 }
 

@@ -5,7 +5,7 @@ import re
 
 from datetime import date as PyDate, datetime
 
-from sqlalchemy import Boolean, Column, Date, DateTime, Float, ForeignKey, Integer, String, Table, func
+from sqlalchemy import Boolean, Column, Date, DateTime, Float, ForeignKey, Integer, String, Table, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
@@ -140,6 +140,7 @@ class Exam(Base):
     high_score: Mapped[float | None] = mapped_column(Float, nullable=True)  # 班级最高分
     high_scorer: Mapped[str] = mapped_column(String(50), default="")  # 最高分的同学
     note: Mapped[str] = mapped_column(String(500), default="")
+    ai_comment: Mapped[str] = mapped_column(String(2000), default="")  # AI 评语（独立于手工备注）
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     child: Mapped["Child"] = relationship(back_populates="exams")
@@ -171,6 +172,7 @@ class Score(Base):
     high_score: Mapped[float | None] = mapped_column(Float, nullable=True)  # 班级最高分
     high_scorer: Mapped[str] = mapped_column(String(50), default="")  # 最高分的同学
     note: Mapped[str] = mapped_column(String(500), default="")
+    ai_comment: Mapped[str] = mapped_column(String(2000), default="")  # AI 评语（独立于手工备注）
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     child: Mapped["Child"] = relationship(back_populates="scores")
@@ -194,3 +196,29 @@ class ScoreImage(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     score: Mapped["Score"] = relationship(back_populates="images")
+
+
+class AiBot(Base):
+    """AI 机器人配置：provider 预设 + 用户填写的 API key，支持多个。"""
+
+    __tablename__ = "ai_bots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(50))  # 机器人名称
+    provider: Mapped[str] = mapped_column(String(50), default="deepseek")  # deepseek/qwen/kimi/zhipu/custom
+    base_url: Mapped[str] = mapped_column(String(200), default="")  # OpenAI 兼容接口地址
+    api_key: Mapped[str] = mapped_column(String(200), default="")
+    model: Mapped[str] = mapped_column(String(100), default="")  # 模型名，可改
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class AiMessage(Base):
+    """AI 会话历史：按机器人保存 user/assistant 消息。"""
+
+    __tablename__ = "ai_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    bot_id: Mapped[int] = mapped_column(ForeignKey("ai_bots.id"))
+    role: Mapped[str] = mapped_column(String(20))  # user / assistant
+    content: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

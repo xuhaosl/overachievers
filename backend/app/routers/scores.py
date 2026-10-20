@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session, joinedload
 from ..auth import AuthDep
 from ..database import get_db
 from ..models import Child, Exam, Score, ScoreImage, SchoolClass, Subject, Unit, rival_names
-from ..schemas import ExamAttachIn, ScoreIds, ScoreIn, ScoreOut, StarIn
+from ..schemas import AiCommentIn, ExamAttachIn, ScoreIds, ScoreIn, ScoreOut, StarIn
 from ..uploads import UPLOAD_DIR, image_out, remove_score_image_files, save_score_image
 from ..term import grade_at_date, infer_term, resolve_stage_grade, short_term_from_long
 
@@ -172,6 +172,17 @@ def set_score_star(score_id: int, body: StarIn, db: Session = Depends(get_db)):
     s.starred = body.starred
     db.commit()
     return {"ok": True, "starred": s.starred}
+
+
+@router.patch("/{score_id}/ai-comment")
+def set_score_ai_comment(score_id: int, body: AiCommentIn, db: Session = Depends(get_db)):
+    """AI 评语写入/清除（content 传空即清除）。"""
+    s = db.get(Score, score_id)
+    if not s:
+        raise HTTPException(404, "成绩不存在")
+    s.ai_comment = body.content.strip()[:2000]
+    db.commit()
+    return {"ok": True, "ai_comment": s.ai_comment}
 
 
 @router.post("/{score_id}/attach")
