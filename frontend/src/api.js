@@ -55,9 +55,13 @@ export const aiApi = {
   updateBot: (id, data) => api.patch(`/ai/bots/${id}`, data),
   deleteBot: (id) => api.delete(`/ai/bots/${id}`),
   testBot: (data) => api.post('/ai/bots/test', data),
+  conversations: (botId) => api.get(`/ai/bots/${botId}/conversations`),
+  createConversation: (botId) => api.post(`/ai/bots/${botId}/conversations`),
+  convMessages: (convId) => api.get(`/ai/conversations/${convId}/messages`),
+  renameConversation: (convId, title) => api.patch(`/ai/conversations/${convId}`, { title }),
+  deleteConversation: (convId) => api.delete(`/ai/conversations/${convId}`),
   messages: (botId) => api.get(`/ai/bots/${botId}/messages`),
   clearMessages: (botId) => api.delete(`/ai/bots/${botId}/messages`),
-  deleteMessage: (id) => api.delete(`/ai/messages/${id}`),
   setScoreComment: (scoreId, content) => api.patch(`/scores/${scoreId}/ai-comment`, { content }),
   setExamComment: (examId, content) => api.patch(`/exams/${examId}/ai-comment`, { content }),
 }
@@ -82,9 +86,11 @@ export async function aiChatStream(body, onDelta) {
   const reader = res.body.getReader()
   const dec = new TextDecoder()
   let buf = ''
+  let doneReading = false
   for (;;) {
     const { done, value } = await reader.read()
     if (done) break
+    if (doneReading) continue // [DONE] 后只排空流，等后端保存完毕
     buf += dec.decode(value, { stream: true })
     let idx
     while ((idx = buf.indexOf('\n')) >= 0) {
@@ -92,7 +98,11 @@ export async function aiChatStream(body, onDelta) {
       buf = buf.slice(idx + 1)
       if (!line.startsWith('data:')) continue
       const data = line.slice(5).trim()
-      if (data === '[DONE]') return
+      if (data === '[DONE]') {
+        // 不立即返回：继续读到流真正关闭，确保后端已把消息/会话标题保存完
+        doneReading = true
+        break
+      }
       try {
         const obj = JSON.parse(data)
         if (obj.ai_error) throw new Error(obj.ai_error)

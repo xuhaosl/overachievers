@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from ..auth import AuthDep
 from ..database import get_db
-from ..models import AiBot, AiMessage, Child, Exam, Score, Subject
+from ..models import AiBot, AiConversation, AiMessage, Child, Exam, Score, Subject
 
 router = APIRouter(prefix="/ai", tags=["ai"], dependencies=[AuthDep])
 
@@ -69,6 +69,7 @@ class BotIn(BaseModel):
 class ChatIn(BaseModel):
     bot_id: int
     question: str
+    conversation_id: int | None = None  # 为空则新建会话
     # 数据范围：孩子必填；场次/学科/时间段可选；focus 指明评语写入目标
     scope: dict = {}
 
@@ -204,7 +205,75 @@ def _validate_bot(body: BotIn):
         raise HTTPException(400, "模型名不能为空")
 
 
-# ---------- 会话历史 ----------
+# ---------- 会话（conversation）管理 ----------
+def _conv_out(c: AiConversation, msg_count: int = 0) -> dict:
+    # 无标题的旧会话不主动消耗 token 补题，显示日期占位；继续聊出新消息时才由 AI 总结命名
+    placeholder = f"{c.created_at.strftime('%Y-%m-%d') if c.created_at else '未命名'} 的会话"
+    return {
+        "id": c.id,
+        "bot_id": c.bot_id,
+        "title": c.title or placeholder,
+        "created_at": c.created_at,
+        "updated_at": c.updated_at,
+        "msg_count": msg_count,
+    }
+
+
+@router.get("/bots/{bot_id}/conversations")
+def list_conversations(bot_id: int, db: Session = Depends(get_db)):
+    """会话列表（按最近活跃倒序），过滤空会话。"""
+    convs = db.scalars(
+        select(AiConversation).where(AiConversation.bot_id == bot_id).order_by(AiConversation.updated_at.desc())
+    ).all()
+    counts = dict(db.execute(
+        select(AiMessage.conversation_id, func.count(AiMessage.id))
+        .where(AiMessage.bot_id == bot_id).group_by(AiMessage.conversation_id)
+    ).all())
+    return [_conv_out(c, counts.get(c.id, 0)) for c in convs if counts.get(c.id, 0) > 0]
+
+
+@router.post("/bots/{bot_id}/conversations")
+def create_conversation(bot_id: int, db: Session = Depends(get_db)):
+    if not db.get(AiBot, bot_id):
+        raise HTTPException(404, "机器人不存在")
+    c = AiConversation(bot_id=bot_id)
+    db.add(c)
+    db.commit()
+    return _conv_out(c)
+
+
+@router.get("/conversations/{conv_id}/messages")
+def conversation_messages(conv_id: int, db: Session = Depends(get_db)):
+    msgs = db.scalars(
+        select(AiMessage).where(AiMessage.conversation_id == conv_id).order_by(AiMessage.id)
+    ).all()
+    return [{"id": m.id, "role": m.role, "content": m.content, "created_at": m.created_at} for m in msgs]
+
+
+@router.patch("/conversations/{conv_id}")
+def rename_conversation(conv_id: int, body: dict, db: Session = Depends(get_db)):
+    """手动修改会话命名。"""
+    title = (body.get("title") or "").strip()[:60]
+    if not title:
+        raise HTTPException(400, "会话名称不能为空")
+    c = db.get(AiConversation, conv_id)
+    if not c:
+        raise HTTPException(404, "会话不存在")
+    c.title = title
+    db.commit()
+    return {"ok": True, "title": title}
+
+
+@router.delete("/conversations/{conv_id}")
+def delete_conversation(conv_id: int, db: Session = Depends(get_db)):
+    c = db.get(AiConversation, conv_id)
+    if c:
+        db.query(AiMessage).filter(AiMessage.conversation_id == conv_id).delete()
+        db.delete(c)
+        db.commit()
+    return {"ok": True}
+
+
 @router.get("/bots/{bot_id}/messages")
 def list_messages(bot_id: int, db: Session = Depends(get_db)):
     msgs = db.scalars(
@@ -215,17 +284,10 @@ def list_messages(bot_id: int, db: Session = Depends(get_db)):
 
 @router.delete("/bots/{bot_id}/messages")
 def clear_messages(bot_id: int, db: Session = Depends(get_db)):
+    """清空该机器人全部会话。"""
     db.query(AiMessage).filter(AiMessage.bot_id == bot_id).delete()
+    db.query(AiConversation).filter(AiConversation.bot_id == bot_id).delete()
     db.commit()
-    return {"ok": True}
-
-
-@router.delete("/messages/{message_id}")
-def delete_message(message_id: int, db: Session = Depends(get_db)):
-    m = db.get(AiMessage, message_id)
-    if m:
-        db.delete(m)
-        db.commit()
     return {"ok": True}
 
 
@@ -341,6 +403,16 @@ def build_context(db: Session, scope: dict) -> str:
         else:
             body = "\n".join(lines) if lines else "（该范围内无成绩记录）"
             blocks.append(f"【孩子「{child.name}」成绩】（{len(lines)} 条）：\n" + body)
+
+    # 选定了某个孩子时，附加其他孩子的成绩概览：AI 才能回答"和 XX 相比"这类跨孩子问题
+    if child_id:
+        others = [c for c in db.scalars(select(Child)).all() if c and c.id != child_id]
+        for other in others:
+            rows = _child_full_rows(db, other.id)[:60]
+            if rows:
+                blocks.append(
+                    f"【其他孩子「{other.name}」成绩概览】（供跨孩子对比，全部 {len(rows)} 条）：\n" + "\n".join(rows)
+                )
     return "\n\n".join(blocks)
 
 
@@ -350,7 +422,9 @@ SYSTEM_PROMPT = (
     "数据可能分块：当前范围明细 + 全历史成绩概览，每条记录都带「学期」和「日期」。"
     "当用户问趋势、进步、对比类问题时，务必结合全历史概览一起分析，而不是只盯着明细范围说数据不足；"
     "当用户说\"本学期/上学期/最近\"等时间词时，根据记录里的学期和日期自行划定范围再分析。"
-    "数据按孩子分块给出，未指定孩子时对所有孩子的数据综合分析。"
+    "数据按孩子分块给出：当前范围明细/全历史概览 + 可能存在的【其他孩子成绩概览】。"
+    "未指定孩子时对所有孩子的数据综合分析；用户提到其他孩子名字（对比、询问）时，"
+    "从对应孩子的数据块中查找，找不到再如实说明（注意：班里同学的成绩系统不录入，只有最高得分者姓名）。"
     "回答要求：使用简体中文；直接给结论和建议，不要复述问题、不要客套；篇幅尽量精炼（一般 200 字以内，"
     "用户明确要求详细分析时才展开）；可用少量短列表和加粗突出重点，不要堆砌标题和嵌套结构；数据不足时如实说明。"
     "当用户要求为某条成绩/某场考试写评语时，用一段 50 字以内、鼓励为主且指出改进方向的评语，"
@@ -372,9 +446,22 @@ async def chat(body: ChatIn, db: Session = Depends(get_db)):
     if not question:
         raise HTTPException(400, "问题不能为空")
 
-    # 组装消息：系统提示 + 最近历史 + 数据上下文 + 本轮问题
+    # 会话：无 id 则新建；有 id 则校验归属该机器人
+    conv = None
+    if body.conversation_id:
+        conv = db.get(AiConversation, body.conversation_id)
+        if not conv or conv.bot_id != bot.id:
+            raise HTTPException(404, "会话不存在")
+    else:
+        conv = AiConversation(bot_id=bot.id)
+        db.add(conv)
+        db.commit()
+        db.refresh(conv)
+    conv_id = conv.id
+
+    # 组装消息：系统提示 + 本会话最近历史 + 数据上下文 + 本轮问题
     history = db.scalars(
-        select(AiMessage).where(AiMessage.bot_id == bot.id).order_by(AiMessage.id.desc()).limit(HISTORY_LIMIT)
+        select(AiMessage).where(AiMessage.conversation_id == conv_id).order_by(AiMessage.id.desc()).limit(HISTORY_LIMIT)
     ).all()
     msgs = [{"role": "system", "content": SYSTEM_PROMPT}]
     for m in reversed(history):
@@ -415,7 +502,7 @@ async def chat(body: ChatIn, db: Session = Depends(get_db)):
         # 流结束：从累积的原始 SSE 文本解析出完整回复并存历史
         reply = _extract_reply("".join(reply_parts))
         if reply:
-            _save_history(bot_id, user_question, reply)
+            _save_history(bot_id, conv_id, user_question, reply)
 
     return StreamingResponse(gen(), media_type="text/event-stream")
 
@@ -440,10 +527,49 @@ def _extract_reply(raw: str) -> str:
     return "".join(out)
 
 
-def _save_history(bot_id: int, question: str, reply: str):
+def _save_history(bot_id: int, conv_id: int, question: str, reply: str):
+    """保存本轮消息；刷新会话活跃时间；空标题会话用模型生成一句话标题。"""
+    from datetime import datetime as _dt
+
     from ..database import SessionLocal
 
     with SessionLocal() as ses:
-        ses.add(AiMessage(bot_id=bot_id, role="user", content=question))
-        ses.add(AiMessage(bot_id=bot_id, role="assistant", content=reply))
+        ses.add(AiMessage(bot_id=bot_id, conversation_id=conv_id, role="user", content=question))
+        ses.add(AiMessage(bot_id=bot_id, conversation_id=conv_id, role="assistant", content=reply))
+        conv = ses.get(AiConversation, conv_id)
+        if conv:
+            conv.updated_at = _dt.now()
+            if not conv.title:
+                conv.title = _gen_title(bot_id, question)[:60]
         ses.commit()
+
+
+def _gen_title(bot_id: int, question: str) -> str:
+    """让模型把本轮问答总结成一句话标题；失败时降级为问题前缀。"""
+    from ..database import SessionLocal
+
+    try:
+        with SessionLocal() as ses:
+            bot = ses.get(AiBot, bot_id)
+            if not bot or not bot.api_key:
+                return question
+            base_url = (bot.base_url or PROVIDERS.get(bot.provider, {}).get("base_url", "")).rstrip("/")
+            resp = httpx.post(
+                f"{base_url}/chat/completions",
+                headers={"Authorization": f"Bearer {bot.api_key}", "Content-Type": "application/json"},
+                json={
+                    "model": bot.model,
+                    "messages": [
+                        {"role": "system", "content": "用不超过20个字概括用户的问题主题，只输出这句话，不要标点结尾。"},
+                        {"role": "user", "content": question[:500]},
+                    ],
+                    "max_tokens": 40,
+                    "temperature": 0.3,
+                },
+                timeout=30,
+            )
+            obj = resp.json()
+            title = (obj["choices"][0]["message"]["content"] or "").strip().strip('"「」')
+            return title or question
+    except Exception:
+        return question

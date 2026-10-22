@@ -48,6 +48,9 @@ def _migrate():
             "year_rank": "INTEGER",  # 全科总排名（学年），手动录入
             "ai_comment": "VARCHAR(2000) DEFAULT ''",
         },
+        "ai_messages": {
+            "conversation_id": "INTEGER",  # 归属会话；旧数据由下方回填
+        },
     }
     with engine.begin() as conn:
         for table, cols in add_plan.items():
@@ -271,6 +274,27 @@ def _migrate():
             "CREATE UNIQUE INDEX IF NOT EXISTS ux_subject_terms ON subject_terms (subject_id, term)"
         ))
         conn.execute(text("DROP TABLE IF EXISTS terms"))
+
+        # AI 会话迁移：旧消息（无会话归属）按机器人归入一条会话，标题留空由 AI 后台补总结
+        am_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(ai_messages)"))}
+        if am_cols and "conversation_id" in am_cols:
+            # 清掉历史版本的占位标题（如「早期会话」），统一走 AI 总结
+            conn.execute(text("UPDATE ai_conversations SET title = '' WHERE title = '早期会话'"))
+            orphans = conn.execute(text(
+                "SELECT bot_id, MIN(created_at) AS t0, MAX(created_at) AS t1 "
+                "FROM ai_messages WHERE conversation_id IS NULL GROUP BY bot_id"
+            )).fetchall()
+            for bot_id, t0, t1 in orphans:
+                ins = conn.execute(
+                    text("INSERT INTO ai_conversations (bot_id, title, created_at, updated_at) "
+                         "VALUES (:b, '', :t0, :t1)"),
+                    {"b": bot_id, "t0": t0, "t1": t1},
+                )
+                conn.execute(
+                    text("UPDATE ai_messages SET conversation_id = :c "
+                         "WHERE conversation_id IS NULL AND bot_id = :b"),
+                    {"c": ins.lastrowid, "b": bot_id},
+                )
 
 
 _migrate()

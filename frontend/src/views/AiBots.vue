@@ -75,32 +75,46 @@
       </template>
     </el-dialog>
 
-    <!-- 会话历史 -->
-    <el-dialog v-model="historyVisible" :title="`会话历史 - ${historyBot?.name || ''}`" width="640px" top="6vh">
+    <!-- 会话历史：按会话折叠 -->
+    <el-dialog v-model="historyVisible" :title="`会话历史 - ${historyBot?.name || ''}`" width="680px" top="6vh">
       <div class="hist-ops">
-        <span class="hint" style="margin: 0">{{ historyMsgs.length }} 条记录</span>
-        <el-button size="small" type="danger" plain :disabled="!historyMsgs.length" @click="clearHistory">
+        <span class="hint" style="margin: 0">{{ conversations.length }} 个会话</span>
+        <el-button size="small" type="danger" plain :disabled="!conversations.length" @click="clearHistory">
           清空记录
         </el-button>
       </div>
       <div class="hist-list">
-        <el-empty v-if="!historyMsgs.length" description="暂无会话记录" />
-        <div v-for="m in historyMsgs" :key="m.id" class="hist-item" :class="m.role">
-          <div class="hist-meta">
-            <span>{{ m.role === 'user' ? '我' : 'AI' }} · {{ (m.created_at || '').replace('T', ' ').slice(0, 16) }}</span>
-            <el-button size="small" text type="danger" @click="delMessage(m)">删除</el-button>
-          </div>
-          <div class="hist-content">{{ m.content }}</div>
-        </div>
+        <el-empty v-if="!conversations.length" description="暂无会话记录" />
+        <el-collapse v-model="expandedConvs">
+          <el-collapse-item v-for="c in conversations" :key="c.id" :name="c.id">
+            <template #title>
+              <div class="conv-head">
+                <span class="conv-head-title">{{ c.title }}</span>
+                <span class="conv-head-meta">{{ fmtTime(c.updated_at) }} · {{ c.msg_count }} 条</span>
+                <el-button size="small" text @click.stop="renameConversation(c)">重命名</el-button>
+                <el-button size="small" text type="danger" @click.stop="removeConversation(c)">删除会话</el-button>
+              </div>
+            </template>
+            <div v-if="convMsgs[c.id]" class="conv-msgs">
+              <div v-for="m in convMsgs[c.id]" :key="m.id" class="hist-item" :class="m.role">
+                <div class="hist-meta">
+                  <span>{{ m.role === 'user' ? '我' : 'AI' }} · {{ fmtTime(m.created_at) }}</span>
+                </div>
+                <div class="hist-content">{{ m.content }}</div>
+              </div>
+            </div>
+            <div v-else class="conv-loading">加载中…</div>
+          </el-collapse-item>
+        </el-collapse>
       </div>
     </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { Plus } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { aiApi, confirmDelete, errMsg } from '../api'
 
 const bots = ref([])
@@ -113,9 +127,25 @@ const testing = ref(false)
 const testResult = ref(null)
 const historyVisible = ref(false)
 const historyBot = ref(null)
-const historyMsgs = ref([])
+const conversations = ref([])
+const expandedConvs = ref([])
+const convMsgs = ref({}) // convId -> messages，展开时懒加载
 
 const currentProvider = computed(() => providers.value.find((p) => p.key === form.value.provider))
+
+// 展开折叠项时懒加载该会话消息
+watch(expandedConvs, async (names) => {
+  for (const id of names) {
+    if (!convMsgs.value[id]) {
+      const { data } = await aiApi.convMessages(id)
+      convMsgs.value = { ...convMsgs.value, [id]: data }
+    }
+  }
+})
+
+function fmtTime(t) {
+  return (t || '').replace('T', ' ').slice(0, 16)
+}
 
 async function load() {
   const [b, p] = await Promise.all([aiApi.bots(), aiApi.providers()])
@@ -186,19 +216,40 @@ async function removeBot(bot) {
 async function openHistory(bot) {
   historyBot.value = bot
   historyVisible.value = true
-  const { data } = await aiApi.messages(bot.id)
-  historyMsgs.value = data
+  expandedConvs.value = []
+  convMsgs.value = {}
+  const { data } = await aiApi.conversations(bot.id)
+  conversations.value = data
+  // 默认展开最近一个会话
+  if (data.length) expandedConvs.value = [data[0].id]
+}
+
+async function removeConversation(c) {
+  await aiApi.deleteConversation(c.id)
+  conversations.value = conversations.value.filter((x) => x.id !== c.id)
+}
+
+async function renameConversation(c) {
+  try {
+    const { value } = await ElMessageBox.prompt('修改会话名称', '重命名', {
+      inputValue: c.title,
+      inputPattern: /\S/,
+      inputErrorMessage: '名称不能为空',
+      maxLength: 60,
+    })
+    await aiApi.renameConversation(c.id, value.trim())
+    const idx = conversations.value.findIndex((x) => x.id === c.id)
+    if (idx >= 0) conversations.value[idx].title = value.trim()
+  } catch (e) {
+    if (e !== 'cancel' && e?.message) ElMessage.error(e.message)
+  }
 }
 
 async function clearHistory() {
   await aiApi.clearMessages(historyBot.value.id)
-  historyMsgs.value = []
+  conversations.value = []
+  convMsgs.value = {}
   ElMessage.success('已清空')
-}
-
-async function delMessage(m) {
-  await aiApi.deleteMessage(m.id)
-  historyMsgs.value = historyMsgs.value.filter((x) => x.id !== m.id)
 }
 </script>
 
@@ -262,6 +313,34 @@ async function delMessage(m) {
 .hist-list {
   max-height: 60vh;
   overflow-y: auto;
+}
+.conv-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding-right: 8px;
+}
+.conv-head-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+.conv-head-meta {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  flex-shrink: 0;
+}
+.conv-msgs {
+  padding: 4px 0;
+}
+.conv-loading {
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+  padding: 8px;
 }
 .hist-item {
   border: 1px solid var(--el-border-color-light);

@@ -27,6 +27,7 @@
           <el-option v-for="b in bots" :key="b.id" :value="b.id" :label="b.name" />
         </el-select>
         <div class="ai-head-ops">
+          <el-button size="small" text :icon="Clock" @click="openHistory">历史</el-button>
           <el-button size="small" text :icon="Setting" @click="gotoSettings">管理</el-button>
           <el-button size="small" text :icon="Close" @click="close()" />
         </div>
@@ -34,6 +35,12 @@
 
       <!-- 数据范围 -->
       <div class="ai-scope">
+        <div class="ai-conv-bar">
+          <span class="ai-conv-title">{{ currentConvTitle }}</span>
+          <el-button v-if="currentConvId" size="small" text type="primary" @click="newConversation">
+            新会话
+          </el-button>
+        </div>
         <div class="ai-scope-row">
           <span class="ai-scope-label">孩子</span>
           <el-select
@@ -132,14 +139,34 @@
         </el-button>
       </div>
     </div>
+
+    <!-- 历史会话抽屉 -->
+    <el-drawer v-model="histVisible" title="历史会话" size="340px" append-to-body>
+      <el-button type="primary" size="small" style="width: 100%; margin-bottom: 10px" @click="newConversation">
+        + 开启新会话
+      </el-button>
+      <el-empty v-if="!conversations.length" description="暂无历史会话" :image-size="80" />
+      <div v-for="c in conversations" :key="c.id" class="conv-item" :class="{ active: c.id === currentConvId }">
+        <div class="conv-main" @click="continueConversation(c)">
+          <div class="conv-title">{{ c.title }}</div>
+          <div class="conv-meta">
+            {{ fmtTime(c.updated_at) }} · {{ c.msg_count }} 条
+          </div>
+        </div>
+        <div class="conv-ops">
+          <el-button size="small" text @click="renameConversation(c)">重命名</el-button>
+          <el-button size="small" text type="danger" @click="removeConversation(c)">删除</el-button>
+        </div>
+      </div>
+    </el-drawer>
   </teleport>
 </template>
 
 <script setup>
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
-import { ChatDotRound, Close, Setting } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { ChatDotRound, Clock, Close, Setting } from '@element-plus/icons-vue'
 import { aiApi, aiChatStream, errMsg } from '../api'
 
 const props = defineProps({ modelValue: Boolean, presetScope: Object })
@@ -164,28 +191,87 @@ const msgBox = ref(null)
 const dateRange = ref(null)
 const scope = ref({ child_id: null, exam_id: null, subject_id: null })
 const focus = ref(null) // {type:'score'|'exam', id, label}
+// 会话状态：currentConvId 为空 = 新会话（发消息时才真正创建）
+const currentConvId = ref(null)
+const conversations = ref([])
+const histVisible = ref(false)
 
 const focusLabel = computed(() => focus.value?.label || '')
+const currentConvTitle = computed(() => {
+  if (!currentConvId.value) return '新会话'
+  const c = conversations.value.find((x) => x.id === currentConvId.value)
+  return c?.title || '会话'
+})
 
 async function loadBots() {
   const { data } = await aiApi.bots()
   bots.value = data
   if (!activeBotId.value && data.length) {
     activeBotId.value = data[0].id
-    loadHistory()
+    newConversation()
   }
 }
 
-async function loadHistory() {
+async function loadConversations() {
   if (!activeBotId.value) return
-  const { data } = await aiApi.messages(activeBotId.value)
+  const { data } = await aiApi.conversations(activeBotId.value)
+  conversations.value = data
+}
+
+function newConversation() {
+  currentConvId.value = null
+  messages.value = []
+  errorText.value = ''
+  histVisible.value = false
+}
+
+async function continueConversation(c) {
+  if (streaming.value) return
+  const { data } = await aiApi.convMessages(c.id)
+  currentConvId.value = c.id
   messages.value = data.map((m) => ({ role: m.role, content: m.content }))
+  histVisible.value = false
+  errorText.value = ''
   scrollBottom()
+}
+
+async function openHistory() {
+  await loadConversations()
+  histVisible.value = true
+}
+
+async function removeConversation(c) {
+  await aiApi.deleteConversation(c.id)
+  if (currentConvId.value === c.id) {
+    currentConvId.value = null
+    messages.value = []
+  }
+  await loadConversations()
+}
+
+async function renameConversation(c) {
+  try {
+    const { value } = await ElMessageBox.prompt('修改会话名称', '重命名', {
+      inputValue: c.title,
+      inputPattern: /\S/,
+      inputErrorMessage: '名称不能为空',
+      maxLength: 60,
+    })
+    await aiApi.renameConversation(c.id, value.trim())
+    await loadConversations()
+  } catch (e) {
+    if (e !== 'cancel' && e?.message) ElMessage.error(e.message)
+  }
+}
+
+function fmtTime(t) {
+  return (t || '').replace('T', ' ').slice(0, 16)
 }
 
 function onBotChange() {
   errorText.value = ''
-  loadHistory()
+  newConversation() // 切机器人默认空白新会话
+  loadConversations()
 }
 
 async function loadExams() {
@@ -350,22 +436,29 @@ async function send() {
   messages.value.push(aiMsg)
   streaming.value = true
   scrollBottom()
-  const body = {
-    bot_id: activeBotId.value,
-    question: q,
-    scope: {
-      child_id: scope.value.child_id || null,
-      exam_id: scope.value.exam_id || null,
-      subject_id: scope.value.subject_id || null,
-      date_from: dateRange.value?.[0] || '',
-      date_to: dateRange.value?.[1] || '',
-    },
-  }
   try {
+    // 新会话首次发消息时先创建会话，后续轮次复用
+    if (!currentConvId.value) {
+      const { data } = await aiApi.createConversation(activeBotId.value)
+      currentConvId.value = data.id
+    }
+    const body = {
+      bot_id: activeBotId.value,
+      conversation_id: currentConvId.value,
+      question: q,
+      scope: {
+        child_id: scope.value.child_id || null,
+        exam_id: scope.value.exam_id || null,
+        subject_id: scope.value.subject_id || null,
+        date_from: dateRange.value?.[0] || '',
+        date_to: dateRange.value?.[1] || '',
+      },
+    }
     await aiChatStream(body, (delta) => {
       aiMsg.content += delta
       scrollBottom()
     })
+    loadConversations() // 刷新会话时间/标题
   } catch (e) {
     errorText.value = e.message || '请求失败'
     if (!aiMsg.content) messages.value.pop()
@@ -425,6 +518,61 @@ defineExpose({ open })
   padding: 8px 12px;
   border-bottom: 1px solid var(--el-border-color-light);
   background: var(--el-fill-color-lighter);
+}
+.ai-conv-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.ai-conv-title {
+  font-size: 12px;
+  font-weight: bold;
+  color: var(--el-color-primary);
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.conv-item {
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  cursor: pointer;
+}
+.conv-item:hover {
+  border-color: var(--el-color-primary-light-5);
+}
+.conv-item.active {
+  border-color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
+}
+.conv-main {
+  flex: 1;
+  min-width: 0;
+}
+.conv-title {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.conv-meta {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  margin-top: 2px;
+}
+.conv-ops {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  margin-left: 4px;
+}
+.conv-ops .el-button + .el-button {
+  margin-left: 0;
 }
 .ai-scope-row {
   display: flex;

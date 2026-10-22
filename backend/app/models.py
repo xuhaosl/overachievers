@@ -212,13 +212,26 @@ class AiBot(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
+class AiConversation(Base):
+    """AI 会话：一个机器人可有多个会话，title 为 AI 总结的一句话。"""
+
+    __tablename__ = "ai_conversations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    bot_id: Mapped[int] = mapped_column(ForeignKey("ai_bots.id"))
+    title: Mapped[str] = mapped_column(String(100), default="")  # AI 总结的主要内容，空=待生成
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())  # 有新消息时刷新
+
+
 class AiMessage(Base):
-    """AI 会话历史：按机器人保存 user/assistant 消息。"""
+    """AI 会话历史：按会话保存 user/assistant 消息。"""
 
     __tablename__ = "ai_messages"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     bot_id: Mapped[int] = mapped_column(ForeignKey("ai_bots.id"))
+    conversation_id: Mapped[int] = mapped_column(ForeignKey("ai_conversations.id"), nullable=True)
     role: Mapped[str] = mapped_column(String(20))  # user / assistant
     content: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
