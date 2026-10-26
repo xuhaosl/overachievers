@@ -310,6 +310,10 @@ def _fmt_score_row(s: Score) -> str:
         parts.append("单元 " + "、".join(f"第{u.sort_no}单元{u.name}" if u.name else f"第{u.sort_no}单元" for u in s.units))
     if s.tags:
         parts.append(f"标签 {s.tags}")
+    if s.note:
+        parts.append(f"备注 {s.note}")
+    if s.ai_comment:
+        parts.append(f"AI评语 {s.ai_comment}")
     if s.high_score is not None:
         parts.append(f"班级最高分 {s.high_score}（{s.high_scorer or '?'}）")
     return " | ".join(parts)
@@ -332,6 +336,10 @@ def _fmt_exam_row(e: Exam, scores: list[Score]) -> str:
         parts.append(f"班级名次 {e.class_rank}/{e.class_size or '?'}")
     if e.tags:
         parts.append(f"标签 {e.tags}")
+    if e.note:
+        parts.append(f"备注 {e.note}")
+    if e.ai_comment:
+        parts.append(f"AI评语 {e.ai_comment}")
     lines = ["场次「%s」：" % e.name + " | ".join(parts)]
     lines += ["  " + _fmt_score_row(s) for s in scores]
     return "\n".join(lines)
