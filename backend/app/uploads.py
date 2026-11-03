@@ -9,9 +9,10 @@ from pathlib import Path
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
+from .database import DATA_DIR
 from .models import ScoreImage
 
-UPLOAD_DIR = Path("data/uploads")
+UPLOAD_DIR = DATA_DIR / "uploads"
 ALLOWED_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
 
 

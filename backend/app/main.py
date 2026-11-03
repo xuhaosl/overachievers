@@ -6,6 +6,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .database import Base, engine
+from .uploads import UPLOAD_DIR
 from .routers import auth as auth_router
 from .routers import backup, children, classes, exams, scores, stats, subjects, update
 from .routers import ai as ai_router
@@ -321,7 +322,7 @@ app.include_router(update.router, prefix="/api")
 app.include_router(ai_router.router, prefix="/api")
 
 # 成绩图片目录（不存在则创建），通过 /uploads/<文件名> 访问
-UPLOAD_DIR = Path(__file__).resolve().parents[1] / "data" / "uploads"
+# 与上传/删除共用同一目录定义，避免写入 DATA_DIR 却从 backend/data 提供文件导致 404
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
