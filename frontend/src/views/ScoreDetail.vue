@@ -80,22 +80,40 @@
       <el-card shadow="never" style="margin-top: 16px">
         <template #header>
           <div class="card-head">
-            <span>试卷图片（为将来的试卷分析、错题整理预留）</span>
-            <el-upload
-              :show-file-list="false"
-              :auto-upload="true"
-              :http-request="doUpload"
-              accept=".jpg,.jpeg,.png,.gif,.webp"
-              multiple
-            >
-              <el-button type="primary" :loading="uploading">上传图片</el-button>
-            </el-upload>
+            <span class="card-title">试卷图片 / 错题整理</span>
+            <div class="head-ops">
+              <el-select
+                v-model="linkNotebookId"
+                clearable
+                size="small"
+                placeholder="错题本"
+                style="width: 140px"
+                @change="onLinkNotebookChange"
+              >
+                <el-option v-for="nb in notebooks" :key="nb.id" :value="nb.id" :label="nb.name" />
+              </el-select>
+              <el-select v-model="linkSetId" clearable size="small" placeholder="错题集" style="width: 160px">
+                <el-option v-for="st in linkSetOptions" :key="st.id" :value="st.id" :label="st.name" />
+              </el-select>
+              <el-button size="small" :disabled="!linkSetId" @click="openPicker">从错题集选取</el-button>
+              <el-button size="small" :disabled="!linkedMistakes.length" @click="goMistakes">
+                查看错题整理{{ linkedMistakes.length ? `（${linkedMistakes.length}）` : '' }}
+              </el-button>
+              <el-upload
+                :show-file-list="false"
+                :auto-upload="true"
+                :http-request="doUpload"
+                accept=".jpg,.jpeg,.png,.gif,.webp"
+                multiple
+              >
+                <el-button type="primary" :loading="uploading">上传图片</el-button>
+              </el-upload>
+            </div>
           </div>
         </template>
 
-        <el-empty v-if="!images.length" description="还没有图片，点右上角上传" :image-size="80" />
-        <div v-else class="img-grid">
-          <div v-for="img in images" :key="img.id" class="img-item">
+        <div v-if="images.length || linkedMistakes.length" class="img-grid">
+          <div v-for="img in images" :key="'img-' + img.id" class="img-item">
             <el-image
               :src="img.url"
               :preview-src-list="images.map((i) => i.url)"
@@ -112,9 +130,65 @@
               <el-button size="small" text @click="addToMistakes(img)">加入错题集</el-button>
             </div>
           </div>
+          <div v-for="m in linkedMistakes" :key="'m-' + m.id" class="img-item linked-item" @click="goMistakes">
+            <el-image
+              v-if="m.image_url"
+              :src="m.image_url"
+              :preview-src-list="linkedImageUrls"
+              :initial-index="linkedImageUrls.indexOf(m.image_url)"
+              preview-teleported
+              fit="cover"
+              class="img-thumb"
+              @click.stop
+            />
+            <div v-else class="img-thumb img-empty">仅文字</div>
+            <div class="img-op">
+              <span class="img-name" :title="m.title || ''">{{ m.title || '错题' }}</span>
+              <el-button link size="small" type="danger" @click.stop="detach(m)">移除</el-button>
+            </div>
+          </div>
         </div>
       </el-card>
     </template>
+
+    <!-- 从错题集选取错题，加入本场成绩的错题整理 -->
+    <el-dialog v-model="pickerVisible" title="从错题集选取" width="720px" top="8vh">
+      <div class="picker-tip">
+        错题本：{{ pickerNotebookName || '全部' }}　错题集：{{ pickerSetName || '未选择' }}
+      </div>
+      <el-table
+        v-loading="pickerLoading"
+        :data="pickerMistakes"
+        size="small"
+        border
+        max-height="420"
+        @selection-change="onPickerChange"
+      >
+        <el-table-column type="selection" width="44" :selectable="(row) => !row._linked" />
+        <el-table-column label="题目" min-width="320">
+          <template #default="{ row }">
+            <div class="brief-title">{{ row.title || '错题' }}</div>
+            <div class="brief-line">{{ briefStem(row) }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column label="题号" width="80">
+          <template #default="{ row }">{{ row.question_no || '-' }}</template>
+        </el-table-column>
+        <el-table-column label="状态" width="90">
+          <template #default="{ row }">
+            <el-tag v-if="row._linked" size="small" type="info">已加入</el-tag>
+            <span v-else class="muted">可选取</span>
+          </template>
+        </el-table-column>
+      </el-table>
+      <el-empty v-if="!pickerLoading && !pickerMistakes.length" description="该错题集下还没有错题" :image-size="70" />
+      <template #footer>
+        <el-button @click="pickerVisible = false">取消</el-button>
+        <el-button type="primary" :loading="attaching" :disabled="!pickerChecked.length" @click="attachSelected">
+          加入（{{ pickerChecked.length }}）
+        </el-button>
+      </template>
+    </el-dialog>
 
     <!-- 编辑成绩 -->
     <ScoreEditDialog v-model="showEdit" :score="s" @saved="load" />
@@ -126,6 +200,7 @@
       :source-score-id="s?.id"
       :source-image-id="mistakeImage?.id"
       :image-url="mistakeImage?.url || ''"
+      @saved="loadLinked"
     />
     <MistakeEditDialog
       v-model="mistakeEditVisible"
@@ -159,6 +234,116 @@ const mistakeEditVisible = ref(false)
 const mistakeImage = ref(null)
 const mistakeDefaults = ref({})
 
+// 错题整理关联：从错题本/错题集里挑选已有错题，挂到本场成绩下
+const notebooks = ref([])
+const allSets = ref([])
+const linkNotebookId = ref(null)
+const linkSetId = ref(null)
+const linkedMistakes = ref([])
+const linkedImageUrls = computed(() => linkedMistakes.value.map((m) => m.image_url).filter(Boolean))
+const pickerVisible = ref(false)
+const pickerLoading = ref(false)
+const pickerMistakes = ref([])
+const pickerChecked = ref([])
+const attaching = ref(false)
+
+const linkSetOptions = computed(() =>
+  allSets.value.filter((st) => !linkNotebookId.value || st.notebook_id === linkNotebookId.value),
+)
+const pickerNotebookName = computed(
+  () => notebooks.value.find((nb) => nb.id === linkNotebookId.value)?.name || '',
+)
+const pickerSetName = computed(
+  () => linkSetOptions.value.find((st) => st.id === linkSetId.value)?.name || '',
+)
+
+function onLinkNotebookChange() {
+  if (linkSetId.value && !linkSetOptions.value.some((st) => st.id === linkSetId.value)) linkSetId.value = null
+}
+
+async function loadTargets(childId) {
+  if (!childId) return
+  try {
+    const [nbRes, setRes] = await Promise.all([
+      api.get('/mistakes/notebooks', { params: { child_id: childId } }),
+      api.get('/mistakes/set-options', { params: { child_id: childId } }),
+    ])
+    notebooks.value = nbRes.data
+    allSets.value = setRes.data
+  } catch (e) {
+    ElMessage.error(errMsg(e))
+  }
+}
+
+// 本场成绩下已整理的错题（按来源关联）
+async function loadLinked() {
+  if (!s.value?.id) return
+  try {
+    const { data } = await api.get('/mistakes', { params: { source_score_id: s.value.id } })
+    linkedMistakes.value = data
+  } catch (e) {
+    ElMessage.error(errMsg(e))
+  }
+}
+
+function briefStem(row) {
+  const line = String(row.stem || '').split(/\n+/).map((x) => x.trim()).filter(Boolean)[0] || ''
+  return line.length > 60 ? `${line.slice(0, 60)}…` : line || '（仅截图）'
+}
+
+async function openPicker() {
+  pickerChecked.value = []
+  pickerVisible.value = true
+  pickerLoading.value = true
+  try {
+    const { data } = await api.get('/mistakes', {
+      params: { child_id: s.value?.child_id, set_id: linkSetId.value },
+    })
+    const linkedIds = new Set(linkedMistakes.value.map((m) => m.id))
+    pickerMistakes.value = data.map((m) => ({ ...m, _linked: linkedIds.has(m.id) }))
+  } catch (e) {
+    ElMessage.error(errMsg(e))
+  } finally {
+    pickerLoading.value = false
+  }
+}
+
+function onPickerChange(rows) {
+  pickerChecked.value = rows
+}
+
+async function attachSelected() {
+  if (!pickerChecked.value.length) return
+  attaching.value = true
+  try {
+    await api.post('/mistakes/attach-score', {
+      score_id: s.value.id,
+      mistake_ids: pickerChecked.value.map((m) => m.id),
+    })
+    ElMessage.success(`已加入 ${pickerChecked.value.length} 道错题`)
+    pickerVisible.value = false
+    await loadLinked()
+  } catch (e) {
+    ElMessage.error(errMsg(e))
+  } finally {
+    attaching.value = false
+  }
+}
+
+async function detach(m) {
+  try {
+    await api.post('/mistakes/detach-score', { mistake_ids: [m.id] })
+    ElMessage.success('已从本场成绩移除')
+    await loadLinked()
+  } catch (e) {
+    ElMessage.error(errMsg(e))
+  }
+}
+
+function goMistakes() {
+  router.push('/mistakes')
+}
+
 function openMistakeAi(img) {
   mistakeImage.value = img
   mistakeAiVisible.value = true
@@ -176,6 +361,7 @@ function addToMistakes(img) {
 
 function onMistakeSaved() {
   ElMessage.success('已加入错题整理')
+  loadLinked()
 }
 
 // 标题：阶段年级学期学科单元，如"某年级第N学期某学科第N单元"
@@ -254,6 +440,11 @@ async function load() {
     const { data } = await api.get(`/scores/${route.params.id}`)
     s.value = data
     images.value = (await api.get(`/scores/${route.params.id}/images`)).data
+    // 关联错题本/错题集与本场已整理的错题
+    linkNotebookId.value = null
+    linkSetId.value = null
+    await loadTargets(data.child_id)
+    await loadLinked()
     // 同孩子全部成绩（按列表顺序：日期倒序），用于上一个/下一个导航
     const { data: list } = await api.get('/scores', { params: { child_id: data.child_id } })
     listIds.value = list.map((x) => x.id)
@@ -347,6 +538,55 @@ onMounted(load)
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px 12px;
+}
+.card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  color: #303133;
+  white-space: nowrap;
+}
+.card-title::before {
+  content: '';
+  width: 3px;
+  height: 14px;
+  border-radius: 2px;
+  background: #409eff;
+}
+.head-ops {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.linked-item {
+  cursor: pointer;
+}
+.img-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f5f7fa;
+  color: #909399;
+  font-size: 12px;
+}
+.picker-tip {
+  font-size: 13px;
+  color: #909399;
+  margin-bottom: 8px;
+}
+.brief-title {
+  font-weight: 600;
+  color: #303133;
+}
+.brief-line {
+  font-size: 12px;
+  color: #606266;
+  white-space: pre-wrap;
 }
 .img-grid {
   display: flex;
@@ -354,31 +594,45 @@ onMounted(load)
   gap: 14px;
 }
 .img-item {
-  width: 150px;
+  width: 172px;
+  padding: 8px;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  background: #fff;
+  transition: box-shadow 0.2s, border-color 0.2s;
+}
+.img-item:hover {
+  border-color: #dcdfe6;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
 }
 .img-thumb {
-  width: 150px;
-  height: 110px;
+  display: block;
+  width: 100%;
+  height: 118px;
   border-radius: 6px;
-  border: 1px solid #ebeef5;
+  background: #f5f7fa;
 }
 .img-op {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-top: 4px;
+  gap: 6px;
+  margin-top: 8px;
 }
 .img-name {
   font-size: 12px;
-  color: #909399;
+  color: #303133;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .img-actions {
   display: flex;
-  gap: 0;
-  margin-top: 2px;
+  justify-content: space-between;
+  gap: 4px;
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px dashed #ebeef5;
 }
 .img-actions :deep(.el-button) {
   padding: 2px 4px;

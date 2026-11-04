@@ -88,10 +88,12 @@
         :data="mistakes"
         size="small"
         border
-        style="cursor: pointer"
+        allow-drag-last-column
+        :row-style="{ cursor: 'pointer' }"
         @row-click="openDetail"
+        @header-dragend="onDragend"
       >
-        <el-table-column label="图" width="64">
+        <el-table-column label="图" :width="widths['图'] || 64">
           <template #default="{ row }">
             <el-image
               v-if="row.image_url"
@@ -105,7 +107,7 @@
             <span v-else class="muted">-</span>
           </template>
         </el-table-column>
-        <el-table-column label="题目" min-width="300">
+        <el-table-column label="题目" :width="widths['题目']" :min-width="widths['题目'] || 300">
           <template #default="{ row }">
             <div class="brief">
               <div class="brief-title">{{ row.title || '错题' }}</div>
@@ -113,18 +115,18 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="知识点" min-width="150">
+        <el-table-column label="知识点" :width="widths['知识点']" :min-width="widths['知识点'] || 150">
           <template #default="{ row }">
             <span>{{ [row.unit_names, row.knowledge_tags].filter(Boolean).join('、') || '-' }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="错因" min-width="150">
+        <el-table-column label="错因" :width="widths['错因']" :min-width="widths['错因'] || 150">
           <template #default="{ row }">
             <div v-if="row.reason" class="reason-cell">{{ row.reason }}</div>
             <span v-else class="muted">-</span>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="90">
+        <el-table-column label="状态" :width="widths['状态'] || 90">
           <template #default="{ row }">
             <el-switch
               :model-value="row.mastered"
@@ -136,7 +138,7 @@
             />
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="110">
+        <el-table-column label="操作" :width="widths['操作'] || 110">
           <template #default="{ row }">
             <el-button link size="small" @click.stop="openEdit(row)">编辑</el-button>
             <el-button link size="small" type="danger" @click.stop="removeMistake(row)">删除</el-button>
@@ -165,10 +167,10 @@
 
     <!-- 管理错题集 -->
     <el-dialog v-model="setManageVisible" title="管理错题集" width="520px">
-      <el-table :data="sets" size="small" border>
-        <el-table-column prop="name" label="名称" />
-        <el-table-column prop="mistake_count" label="错题数" width="90" />
-        <el-table-column label="操作" width="130">
+      <el-table :data="sets" size="small" border allow-drag-last-column @header-dragend="onSetDragend">
+        <el-table-column prop="name" label="名称" :width="setWidths['名称']" :min-width="setWidths['名称'] || 160" />
+        <el-table-column prop="mistake_count" label="错题数" :width="setWidths['错题数'] || 90" />
+        <el-table-column label="操作" :width="setWidths['操作'] || 130">
           <template #default="{ row }">
             <el-button link size="small" @click="promptRenameSet(row)">重命名</el-button>
             <el-button link size="small" type="danger" @click="removeSet(row)">删除</el-button>
@@ -283,8 +285,13 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Collection, MagicStick, Plus, Search } from '@element-plus/icons-vue'
 import { api, errMsg } from '../api'
 import { store, setChild } from '../store'
+import { useColWidths } from '../utils'
 import MistakeEditDialog from '../components/MistakeEditDialog.vue'
 import MistakeAiDialog from '../components/MistakeAiDialog.vue'
+
+// 列宽记忆：错题列表、管理错题集列表拖动列宽后各自持久化
+const { widths, onDragend } = useColWidths('mistakes-list')
+const { widths: setWidths, onDragend: onSetDragend } = useColWidths('mistakes-sets-list')
 
 const childId = ref(null)
 const notebooks = ref([])

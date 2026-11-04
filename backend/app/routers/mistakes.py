@@ -79,6 +79,15 @@ class SearchConfigIn(BaseModel):
     api_key: str = ""
 
 
+class AttachScoreIn(BaseModel):
+    score_id: int
+    mistake_ids: list[int] = []
+
+
+class DetachScoreIn(BaseModel):
+    mistake_ids: list[int] = []
+
+
 # ---------- 工具 ----------
 def _notebook_out(nb: MistakeNotebook, set_count: int, mistake_count: int) -> dict:
     return {
@@ -443,6 +452,7 @@ def list_mistakes(
     unit_id: int | None = Query(None),
     mastered: bool | None = Query(None),
     keyword: str | None = Query(None),
+    source_score_id: int | None = Query(None),
     db: Session = Depends(get_db),
 ):
     q = select(Mistake)
@@ -452,6 +462,8 @@ def list_mistakes(
         q = q.where(Mistake.sets.any(MistakeSet.notebook_id == notebook_id))
     if set_id:
         q = q.where(Mistake.sets.any(MistakeSet.id == set_id))
+    if source_score_id:
+        q = q.where(Mistake.source_score_id == source_score_id)
     if mastered is not None:
         q = q.where(Mistake.mastered == mastered)
     if keyword:
@@ -473,6 +485,34 @@ def list_mistakes(
             pass
     unit_map = _units_of(db, all_unit_ids)
     return [_mistake_out(m, unit_map) for m in rows]
+
+
+@router.post("/attach-score")
+def attach_score(body: AttachScoreIn, db: Session = Depends(get_db)):
+    """把已有错题挂到某场成绩下（不新增错题，只建立来源关联）。"""
+    score = db.get(Score, body.score_id)
+    if not score:
+        raise HTTPException(404, "成绩不存在")
+    rows = db.scalars(
+        select(Mistake).where(
+            Mistake.id.in_(body.mistake_ids or []),
+            Mistake.child_id == score.child_id,
+        )
+    ).all()
+    for m in rows:
+        m.source_score_id = score.id
+    db.commit()
+    return {"ok": True, "count": len(rows)}
+
+
+@router.post("/detach-score")
+def detach_score(body: DetachScoreIn, db: Session = Depends(get_db)):
+    """取消错题与成绩的来源关联，错题本身保留。"""
+    rows = db.scalars(select(Mistake).where(Mistake.id.in_(body.mistake_ids or []))).all()
+    for m in rows:
+        m.source_score_id = None
+    db.commit()
+    return {"ok": True, "count": len(rows)}
 
 
 @router.post("")
