@@ -22,6 +22,9 @@
           <el-switch v-model="form.mastered" active-text="已掌握" inactive-text="未掌握" />
         </el-form-item>
       </div>
+      <el-form-item label="标题">
+        <el-input v-model="form.title" maxlength="120" placeholder="错题标题，如 阅读理解《故乡》" />
+      </el-form-item>
       <el-form-item label="题干">
         <el-input v-model="form.stem" type="textarea" :rows="3" placeholder="题干文字（图片与题干至少填一项）" />
       </el-form-item>
@@ -131,6 +134,7 @@ function reset() {
     id: m?.id || null,
     set_ids: m?.set_ids?.slice() || props.defaults?.setIds?.slice() || [],
     question_no: m?.question_no || '',
+    title: m?.title || '',
     stem: m?.stem || '',
     my_answer: m?.my_answer || '',
     correct_answer: m?.correct_answer || '',
@@ -215,6 +219,7 @@ async function save() {
     child_id: props.childId,
     set_ids: form.value.set_ids,
     question_no: form.value.question_no,
+    title: form.value.title,
     stem: form.value.stem,
     my_answer: form.value.my_answer,
     correct_answer: form.value.correct_answer,

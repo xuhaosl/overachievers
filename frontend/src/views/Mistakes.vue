@@ -46,7 +46,6 @@
       </div>
 
       <div class="set-tabs">
-        <el-check-tag :checked="selectedSet === 0" @change="selectSet(0)">全部（{{ selectedNotebook.mistake_count }}）</el-check-tag>
         <el-check-tag
           v-for="s in sets"
           :key="s.id"
@@ -106,10 +105,12 @@
             <span v-else class="muted">-</span>
           </template>
         </el-table-column>
-        <el-table-column label="题目" min-width="260">
+        <el-table-column label="题目" min-width="300">
           <template #default="{ row }">
-            <span class="qn" v-if="row.question_no">第 {{ row.question_no }} 题</span>
-            <span class="stem-clip">{{ row.stem || '（仅截图）' }}</span>
+            <div class="brief">
+              <div class="brief-title">{{ row.title || '错题' }}</div>
+              <div v-for="(line, i) in briefLines(row.stem)" :key="i" class="brief-line">{{ line }}</div>
+            </div>
           </template>
         </el-table-column>
         <el-table-column label="知识点" min-width="150">
@@ -117,8 +118,11 @@
             <span>{{ [row.unit_names, row.knowledge_tags].filter(Boolean).join('、') || '-' }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="所属错题集" min-width="140">
-          <template #default="{ row }">{{ row.sets.map((s) => s.name).join('、') }}</template>
+        <el-table-column label="错因" min-width="150">
+          <template #default="{ row }">
+            <div v-if="row.reason" class="reason-cell">{{ row.reason }}</div>
+            <span v-else class="muted">-</span>
+          </template>
         </el-table-column>
         <el-table-column label="状态" width="90">
           <template #default="{ row }">
@@ -195,6 +199,7 @@
           fit="contain"
           class="detail-img detail-figure"
         />
+        <div class="detail-row" v-if="detail.title"><b>标题：</b>{{ detail.title }}</div>
         <div class="detail-row"><b>题目：</b><span v-if="detail.question_no">第 {{ detail.question_no }} 题 </span>{{ detail.stem || '（仅截图）' }}</div>
         <div class="detail-row"><b>我的答案：</b>{{ detail.my_answer || '-' }}</div>
         <div class="detail-row"><b>正确答案：</b>{{ detail.correct_answer || '-' }}</div>
@@ -320,7 +325,7 @@ const printScopeLabel = computed(() => {
     const s = sets.value.find((x) => x.id === selectedSet.value)
     return `${nb} / ${s?.name || ''}`
   }
-  return `${nb}（全部错题集）`
+  return nb
 })
 const unitOptions = computed(() => {
   const out = []
@@ -406,8 +411,8 @@ async function loadMistakes() {
 
 async function openNotebook(nb) {
   selectedNotebook.value = nb
-  selectedSet.value = 0
   await loadSets()
+  selectedSet.value = sets.value[0]?.id || 0
   await loadMistakes()
 }
 
@@ -485,9 +490,11 @@ async function saveSet() {
   const name = setDialog.name.trim()
   if (!name) return ElMessage.warning('请输入名称')
   try {
-    await api.post('/mistakes/notebooks/' + selectedNotebook.value.id + '/sets', { name })
+    const { data } = await api.post('/mistakes/notebooks/' + selectedNotebook.value.id + '/sets', { name })
     setDialog.visible = false
     await loadSets()
+    selectedSet.value = data.id
+    await loadMistakes()
     await loadNotebooks()
   } catch (e) {
     ElMessage.error(errMsg(e))
@@ -514,6 +521,7 @@ async function removeSet(s) {
   )
   if (selectedSet.value === s.id) selectedSet.value = 0
   await loadSets()
+  if (!selectedSet.value) selectedSet.value = sets.value[0]?.id || 0
   await loadMistakes()
   await loadNotebooks()
 }
@@ -573,6 +581,20 @@ function openAi() {
 
 async function onMistakeSaved() {
   await refreshAll()
+}
+
+/** 列表摘要：大题合并记录优先列出各错小题，单题只取题干前两行。 */
+function briefLines(stem) {
+  const lines = String(stem || '')
+    .split(/\n+/)
+    .map((x) => x.trim())
+    .filter(Boolean)
+  if (!lines.length) return ['（仅截图）']
+  const subLines = lines.filter((x) => /^[（(]\s*\d+\s*[）)]/.test(x))
+  if (subLines.length) {
+    return subLines.slice(0, 6).map((x) => x.replace(/^[（(]\s*(\d+)\s*[）)]\s*/, '$1. '))
+  }
+  return lines.slice(0, 2)
 }
 
 async function toggleMastered(row) {
@@ -791,6 +813,29 @@ function doPrint() {
   color: #409eff;
   font-weight: 600;
   margin-right: 6px;
+}
+.brief {
+  line-height: 1.6;
+}
+.brief-title {
+  font-weight: 600;
+  color: #303133;
+  margin-bottom: 2px;
+}
+.brief-line {
+  white-space: pre-wrap;
+  font-size: 12px;
+  color: #606266;
+}
+.reason-cell {
+  font-size: 12px;
+  color: #606266;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 .stem-clip {
   display: inline-block;

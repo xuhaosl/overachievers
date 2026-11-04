@@ -54,6 +54,7 @@ def _migrate():
             "conversation_id": "INTEGER",  # 归属会话；旧数据由下方回填
         },
         "mistakes": {
+            "title": "VARCHAR(120) DEFAULT ''",
             "figure_filename": "VARCHAR(200)",
             "figure_owned": "BOOLEAN DEFAULT 0",
         },

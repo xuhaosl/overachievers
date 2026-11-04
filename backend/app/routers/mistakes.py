@@ -56,6 +56,7 @@ class MistakeIn(BaseModel):
     child_id: int
     set_ids: list[int]
     question_no: str = ""
+    title: str = ""
     stem: str = ""
     my_answer: str = ""
     correct_answer: str = ""
@@ -115,6 +116,7 @@ def _mistake_out(m: Mistake, unit_map: dict[int, Unit] | None = None) -> dict:
         "id": m.id,
         "child_id": m.child_id,
         "question_no": m.question_no,
+        "title": m.title,
         "stem": m.stem,
         "my_answer": m.my_answer,
         "correct_answer": m.correct_answer,
@@ -208,6 +210,7 @@ def _delete_own_files(m: Mistake):
 
 def _apply_mistake(m: Mistake, body: MistakeIn, sets: list[MistakeSet]):
     m.question_no = body.question_no.strip()[:20]
+    m.title = body.title.strip()[:120]
     m.stem = body.stem.strip()
     m.my_answer = body.my_answer.strip()
     m.correct_answer = body.correct_answer.strip()
@@ -734,17 +737,25 @@ def _match_units(db: Session, subject_id: int | None, names: list[str]) -> list[
 RECOGNIZE_PROMPT = (
     "你是试卷错题整理助手。图片可能是整卷、单题或题目局部。只输出一个 JSON 对象，不要解释或 Markdown。"
     "格式：{\"has_marks\": true/false, \"questions\": [{"
-    "\"no\": \"题号（多小题时用原小题号）\", \"stem\": \"按原题排版的题干\", "
+    "\"no\": \"题号（多小题时用原小题号）\", \"title\": \"本题一句话标题（12字内，如：阅读理解《故乡》人物形象）\", "
+    "\"stem\": \"按原题排版的题干\", "
     "\"my_answer\": \"学生作答\", \"correct_answer\": \"正确答案\", "
     "\"explanation\": \"解析\", \"reason\": \"错因\", \"knowledge\": [\"知识点\"], "
     "\"is_wrong\": true/false, \"wrong_mark\": \"判错依据\", \"has_figure\": true/false, "
-    "\"figure_box\": [x, y, w, h] 或 null, \"figure_desc\": \"配图简述\", \"box\": [x, y, w, h] 或 null}]}。"
+    "\"figure_box\": [x, y, w, h] 或 null, \"figure_desc\": \"配图简述\", \"box\": [x, y, w, h] 或 null, "
+    "\"group_no\": \"大题号（同一大题的小题填相同值，独立题留空）\", "
+    "\"group_title\": \"大题标题（同一大题填相同值，独立题留空）\", "
+    "\"group_stem\": \"该大题的公共材料或题干（独立题留空）\"}]}。"
     "规则："
     "1) 有红笔批改痕迹（红叉、红笔画掉、扣分、写「错」）时 has_marks=true；没有时 has_marks=false。"
     "2) has_marks=true 时：同一道大题下的所有小题都要列出，并明确 is_wrong（红笔判错 true、答对 false）；"
     "其他与错题无关的答对题目不要输出；wrong_mark 只对判错的题写具体依据"
     "（如「第2题旁红叉」「第5题扣2分」），写不出依据的题判为 false；"
-    "3) 同一大题含多个小题时按小题拆分，no 用原小题号（1、2、(3)）；stem 只写该小题题干，不要重复整篇阅读材料；"
+    "3) 同一大题含多个小题时按小题拆分，no 用原小题号（1、2、(3)）；"
+    "每条的 group_no 必须是父级大题号（如「二」「二、阅读理解」），同一大题的所有小题必须填完全相同的值，禁止填小题号；"
+    "group_stem 填该大题公共材料/题干，每条都重复填同一内容；stem 只写该小题题干，不要重复整篇阅读材料；"
+    "独立题 group_no 和 group_stem 留空；"
+    "示例：阅读理解「二、阅读短文」下第 1、2、3 小题都错，返回 3 条，三条的 group_no 都是「二」，group_stem 都是同一段短文；"
     "4) 题干按原题排版：要作答的位置用「______」占位，不填答案；选择题保留 A/B/C/D 选项；看不清的字用 □ 代替；"
     "5) 答案字段只针对错处，答对的空不要出现；my_answer 原文照抄（含错别字），correct_answer 必须给出标准答案，即使不确定；"
     "例如 4 个空只有第 3 空错：my_answer 写「第3空：学生原文」，correct_answer 写「第3空：标准答案」，第1、2、4 空不要出现；"
@@ -753,7 +764,8 @@ RECOGNIZE_PROMPT = (
     "8) 有几何图形、电路图、函数图像、表格时 has_figure=true，figure_box 用归一化 [x, y, w, h] 只框图形本身；"
     "9) 学生作答看不清可留空，但不要编造学生作答；"
     "10) has_marks=true 且同一大题有多个小题时，必须给每条 box：该小题在原图中的归一化区域"
-    "（包含题干、作答和红笔痕迹），只框这一小题；看不清位置时 box 写 null。"
+    "（包含题干、作答和红笔痕迹），只框这一小题；看不清位置时 box 写 null；"
+    "11) title 必须是概括性标题，禁止只写「第几题」；同一大题的 group_title 填相同的标题，独立题 group_title 留空。"
 )
 
 VERIFY_WRONG_PROMPT = (
@@ -776,15 +788,18 @@ CROP_VERIFY_PROMPT = (
 TARGET_PROMPT = (
     "你是试卷错题识别助手。图片可能是一道大题（含多个小题）或整页。"
     "请只识别下面指定题号的那道小题，其他小题全部忽略；即使这道小题没有红笔批改痕迹也要输出。"
-    "只输出 JSON：{\"questions\": [{\"no\": \"题号\", \"stem\": \"题干\", \"my_answer\": \"学生作答\", "
+    "只输出 JSON：{\"questions\": [{\"no\": \"题号\", \"title\": \"本题一句话标题\", \"stem\": \"题干\", "
+    "\"my_answer\": \"学生作答\", "
     "\"correct_answer\": \"正确答案\", \"explanation\": \"解析\", \"reason\": \"错因\", "
     "\"knowledge\": [\"知识点\"], \"is_wrong\": true, \"has_figure\": false, "
-    "\"figure_box\": null, \"figure_desc\": \"\"}]}，不要解释。"
+    "\"figure_box\": null, \"figure_desc\": \"\", \"group_no\": \"\", "
+    "\"group_title\": \"\", \"group_stem\": \"\"}]}，不要解释。"
     "规则：1) no 固定为指定题号，is_wrong 固定为 true；"
     "2) 题干按原题排版，作答处用「______」占位，只写该小题，不重复整篇材料；"
     "3) my_answer 原文照抄，correct_answer 必须给出标准答案；"
     "4) 有配图时 has_figure=true 并给归一化 figure_box；"
-    "5) 图片里找不到该题号时输出 {\"questions\": []}。"
+    "5) 该小题属于某道大题时，group_no 填大题号、group_stem 填公共材料或题干；独立题留空；"
+    "6) 图片里找不到该题号时输出 {\"questions\": []}。"
 )
 
 
@@ -810,9 +825,13 @@ def _question_out(
             # 分辨不出具体错处时，解析/错因也不强行编造，避免误导读题人
             explanation = ""
             reason = ""
+    stem = str(q.get("stem") or "").strip()
+    title = str(q.get("title") or "").strip()[:120] or re.sub(r"\s+", " ", stem)[:30]
     return {
         "no": str(q.get("no") or "").strip(),
-        "stem": str(q.get("stem") or "").strip(),
+        "title": title,
+        "group_title": str(q.get("group_title") or "").strip()[:120],
+        "stem": stem,
         "my_answer": my_answer,
         "correct_answer": correct_answer,
         "explanation": explanation,
@@ -825,6 +844,8 @@ def _question_out(
         "figure_filename": figure_file,
         "figure_url": f"/uploads/{figure_file}" if figure_file else "",
         "order": i,
+        "group_no": str(q.get("group_no") or "").strip(),
+        "group_stem": str(q.get("group_stem") or "").strip(),
         "_box": q.get("box"),
     }
 
@@ -832,6 +853,30 @@ def _question_out(
 def _norm_no(text: str) -> str:
     """题号归一化：第2题、(3)、2. 都转成 2。"""
     return re.sub(r"[第题()（）\s.、]", "", str(text or ""))
+
+
+def _fill_group_info(questions: list[dict]) -> None:
+    """同一大题的 group_no 与 group_stem 互相补齐，避免模型只填了其中一项。"""
+    stem_by_no: dict[str, str] = {}
+    no_by_stem: dict[str, str] = {}
+    title_by_no: dict[str, str] = {}
+    for q in questions:
+        no = _norm_no(q.get("group_no"))
+        stem = str(q.get("group_stem") or "").strip()
+        if no and stem:
+            stem_by_no.setdefault(no, stem)
+            no_by_stem.setdefault(stem, q["group_no"].strip())
+        if no and str(q.get("group_title") or "").strip():
+            title_by_no.setdefault(no, q["group_title"].strip())
+    for q in questions:
+        no = _norm_no(q.get("group_no"))
+        stem = str(q.get("group_stem") or "").strip()
+        if no and not stem and no in stem_by_no:
+            q["group_stem"] = stem_by_no[no]
+        elif stem and not no and stem in no_by_stem:
+            q["group_no"] = no_by_stem[stem]
+        if no and not str(q.get("group_title") or "").strip() and no in title_by_no:
+            q["group_title"] = title_by_no[no]
 
 
 async def _verify_wrong_questions(
@@ -1089,6 +1134,7 @@ async def ai_recognize(
             q, i, image_bytes, db,
             score.subject_id if score else subject_id, has_marks,
         ))
+    _fill_group_info(questions)
     # 多小题时优先逐题裁图核对红笔痕迹，裁图不可用时退回整图核对
     if has_marks and len(questions) >= 2:
         verdicts = await _verify_by_crops(bot, image_bytes, questions)

@@ -2,11 +2,15 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  attachToNearestGroup,
+  buildGroupAggregate,
   buildQuestionForm,
   buildQuestionOptions,
+  groupSiblings,
   normalizeNo,
   questionOptionLabel,
   selectWrongQuestions,
+  sortQuestionsByNo,
 } from '../src/utils/mistakeQuestionNav.js'
 
 test('题号下拉：优先显示识别到的小题号', () => {
@@ -117,4 +121,141 @@ test('手动添加：题号归一化后可用于查重', () => {
   assert.equal(normalizeNo('(2)'), '2')
   assert.equal(normalizeNo(' 4. '), '4')
   assert.equal(normalizeNo(''), '')
+})
+
+test('手动添加：按题号顺序排列，而不是追加到末尾', () => {
+  const items = [{ no: '1' }, { no: '3' }, { no: '5' }, { no: '2' }]
+  assert.deepEqual(sortQuestionsByNo(items).map((q) => q.no), ['1', '2', '3', '5'])
+})
+
+test('手动添加：(3) 按数字排序，无题号的题排最后', () => {
+  const items = [{ no: '(4)' }, { no: '' }, { no: '2' }, { no: '第3题' }]
+  assert.deepEqual(sortQuestionsByNo(items).map((q) => q.no), ['2', '第3题', '(4)', ''])
+})
+
+test('手动添加：题号相同时保持原有顺序', () => {
+  const items = [{ no: '2', stem: '甲' }, { no: '(2)', stem: '乙' }, { no: '1', stem: '丙' }]
+  assert.deepEqual(sortQuestionsByNo(items).map((q) => q.stem), ['丙', '甲', '乙'])
+})
+
+test('整体保存：同一大题下的错题归为一组', () => {
+  const items = [
+    { no: '1', group_no: '二', group_stem: '阅读材料', stem: '小题1' },
+    { no: '2', group_no: '二', group_stem: '阅读材料', stem: '小题2' },
+    { no: '3', group_no: '三', group_stem: '其他材料', stem: '小题3' },
+  ]
+  assert.deepEqual(groupSiblings(items, 0).map((q) => q.no), ['1', '2'])
+  assert.deepEqual(groupSiblings(items, 2).map((q) => q.no), ['3'])
+})
+
+test('整体保存：题干保留公共材料，答案按小题合并', () => {
+  const items = [
+    {
+      no: '1',
+      group_no: '二',
+      group_stem: '阅读材料',
+      stem: '第一小题',
+      my_answer: '甲答案',
+      correct_answer: '甲标准',
+      explanation: '甲解析',
+      reason: '甲错因',
+      knowledge: ['概括'],
+    },
+    {
+      no: '3',
+      group_no: '二',
+      group_stem: '阅读材料',
+      stem: '第三小题',
+      my_answer: '丙答案',
+      correct_answer: '丙标准',
+      explanation: '丙解析',
+      reason: '丙错因',
+      knowledge: ['赏析'],
+    },
+  ]
+  const merged = buildGroupAggregate(items, 0)
+  assert.equal(merged.question_no, '二')
+  assert.equal(merged.stem, '阅读材料\n\n（1）第一小题\n\n（3）第三小题')
+  assert.equal(merged.my_answer, '（1）甲答案\n（3）丙答案')
+  assert.equal(merged.correct_answer, '（1）甲标准\n（3）丙标准')
+  assert.deepEqual(merged.knowledge, ['概括', '赏析'])
+})
+
+test('整体保存：有公共材料但只错一道小题时也保留材料', () => {
+  const items = [
+    {
+      no: '2',
+      group_no: '二',
+      group_stem: '阅读材料',
+      stem: '第二小题',
+      my_answer: '乙答案',
+      correct_answer: '乙标准',
+    },
+  ]
+  const merged = buildGroupAggregate(items, 0)
+  assert.ok(merged)
+  assert.equal(merged.stem, '阅读材料\n\n（2）第二小题')
+})
+
+test('整体保存：group_no 不一致但公共材料相同也归为一组', () => {
+  const items = [
+    { no: '1', group_no: '1', group_stem: '同一段阅读材料', stem: '小题1' },
+    { no: '2', group_no: '2', group_stem: '同一段阅读材料', stem: '小题2' },
+    { no: '3', group_no: '3', stem: '独立题' },
+  ]
+  assert.deepEqual(groupSiblings(items, 0).map((q) => q.no), ['1', '2'])
+  assert.deepEqual(groupSiblings(items, 2).map((q) => q.no), ['3'])
+})
+
+test('整体保存：只有部分小题填了公共材料时按大题号补全分组', () => {
+  const items = [
+    { no: '1', group_no: '二', group_stem: '阅读材料', stem: '小题1' },
+    { no: '2', group_no: '二', group_stem: '', stem: '小题2' },
+  ]
+  assert.deepEqual(groupSiblings(items, 1).map((q) => q.no), ['1', '2'])
+})
+
+test('整体保存：合并记录使用 AI 生成的大题标题', () => {
+  const items = [
+    { no: '3', group_no: '二', group_title: '阅读理解《故乡》', group_stem: '阅读材料', stem: '3.人物形象' },
+    { no: '4', group_no: '二', group_title: '阅读理解《故乡》', group_stem: '阅读材料', stem: '4.句子赏析' },
+  ]
+  assert.equal(buildGroupAggregate(items, 0).title, '阅读理解《故乡》')
+})
+
+test('手动补题：没有分组信息时并入已有大题', () => {
+  const items = [
+    { no: '3', group_no: '二', group_title: '阅读理解《故乡》', group_stem: '材料', stem: '第三小题' },
+    { no: '4', group_no: '二', group_title: '阅读理解《故乡》', group_stem: '材料', stem: '第四小题' },
+  ]
+  const added = attachToNearestGroup({ no: '5', stem: '第五小题' }, items)
+  assert.equal(added.group_no, '二')
+  assert.equal(added.group_stem, '材料')
+  assert.equal(added.group_title, '阅读理解《故乡》')
+})
+
+test('手动补题：已有分组信息且匹配时不覆盖', () => {
+  const items = [{ no: '3', group_no: '二', group_stem: '材料' }]
+  const added = attachToNearestGroup({ no: '4', group_no: '二', group_stem: '材料' }, items)
+  assert.equal(added.group_no, '二')
+})
+
+test('手动补题：多个大题时并入题号最接近的一个', () => {
+  const items = [
+    { no: '3', group_no: '二', group_stem: '阅读材料' },
+    { no: '4', group_no: '二', group_stem: '阅读材料' },
+    { no: '9', group_no: '三', group_stem: '古诗材料' },
+  ]
+  const added = attachToNearestGroup({ no: '5', stem: '第五小题' }, items)
+  assert.equal(added.group_no, '二')
+})
+
+test('手动补题：没有任何大题时不强行分组', () => {
+  const added = attachToNearestGroup({ no: '5', stem: '独立题' }, [{ no: '1', stem: '第一题' }])
+  assert.equal(added.group_no || '', '')
+})
+
+test('整体保存：独立题仍按单题保存', () => {
+  const items = [{ no: '5', stem: '独立题', my_answer: '错', correct_answer: '对' }]
+  assert.equal(buildGroupAggregate(items, 0), null)
 })

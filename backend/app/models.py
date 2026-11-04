@@ -285,6 +285,7 @@ class Mistake(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     child_id: Mapped[int] = mapped_column(ForeignKey("children.id"))
     question_no: Mapped[str] = mapped_column(String(20), default="")  # 题号，如 3、三(1)
+    title: Mapped[str] = mapped_column(String(120), default="")  # AI 总结的标题，用于列表展示
     stem: Mapped[str] = mapped_column(Text, default="")  # 题干文字
     my_answer: Mapped[str] = mapped_column(Text, default="")  # 我的答案
     correct_answer: Mapped[str] = mapped_column(Text, default="")  # 正确答案

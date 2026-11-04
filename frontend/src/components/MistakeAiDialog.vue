@@ -46,9 +46,13 @@
         <div class="step-head">
           <div class="step-nav">
             <span>第 {{ current + 1 }} / {{ items.length }} 道</span>
-            <el-select v-model="current" size="small" class="jump-select" @change="loadCurrent">
+            <el-tag v-if="currentGroupCount > 1" size="small" type="warning">
+              本大题 {{ currentGroupCount }} 道错题合并保存
+            </el-tag>
+            <el-select :model-value="current" size="small" class="jump-select" @change="onJump">
               <el-option v-for="(q, i) in items" :key="i" :value="i" :label="questionOptionLabel(q, i)" />
             </el-select>
+            <el-button size="small" type="danger" plain @click="removeCurrent">删除本题</el-button>
             <el-button size="small" type="primary" plain :loading="adding" @click="addByNo">手动添加</el-button>
             <el-button size="small" plain @click="reRecognize">重新识别</el-button>
           </div>
@@ -56,7 +60,15 @@
         </div>
         <div class="step-body">
           <div class="left">
-            <img v-if="preview" :src="preview" class="src-big" alt="试卷原图" />
+            <el-image
+              v-if="preview"
+              :src="preview"
+              :preview-src-list="[preview]"
+              preview-teleported
+              fit="contain"
+              class="src-big"
+              alt="试卷原图"
+            />
           </div>
           <div class="right">
             <el-form label-width="76px">
@@ -70,6 +82,9 @@
                   </el-select>
                 </el-form-item>
               </div>
+              <el-form-item label="标题">
+                <el-input v-model="form.title" maxlength="120" placeholder="AI 总结的标题，如 阅读理解《故乡》" />
+              </el-form-item>
               <el-form-item label="题干">
                 <el-input v-model="form.stem" type="textarea" :autosize="{ minRows: 2, maxRows: 6 }" />
               </el-form-item>
@@ -143,7 +158,7 @@ import { computed, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Loading } from '@element-plus/icons-vue'
 import { api, errMsg } from '../api'
-import { buildQuestionForm, normalizeNo, questionOptionLabel, selectWrongQuestions } from '../utils/mistakeQuestionNav'
+import { attachToNearestGroup, buildGroupAggregate, buildQuestionForm, groupSiblings, normalizeNo, questionOptionLabel, selectWrongQuestions, sortQuestionsByNo } from '../utils/mistakeQuestionNav'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -176,6 +191,7 @@ const addedCount = ref(0)
 
 const form = reactive({
   no: '',
+  title: '',
   stem: '',
   my_answer: '',
   correct_answer: '',
@@ -188,6 +204,7 @@ const form = reactive({
 
 const preview = computed(() => localPreview.value || props.imageUrl || '')
 const currentItem = computed(() => items.value[current.value] || {})
+const currentGroupCount = computed(() => groupSiblings(items.value, current.value).length)
 const currentFigure = computed(() => currentItem.value.figure_url || '')
 const currentHasFigure = computed(() => !!currentItem.value.has_figure)
 const setGroups = computed(() => {
@@ -289,6 +306,31 @@ async function recognize() {
   }
 }
 
+async function removeCurrent() {
+  const item = items.value[current.value]
+  if (!item) return
+  if (item.done) {
+    try {
+      await ElMessageBox.confirm(
+        '这道题已经加入错题集，从列表移除不会删除已保存的错题。',
+        '移除本题',
+        { type: 'warning', confirmButtonText: '移除', cancelButtonText: '取消' },
+      )
+    } catch {
+      return
+    }
+  }
+  items.value.splice(current.value, 1)
+  if (!items.value.length) {
+    phase.value = 'idle'
+    ElMessage.info('已移除全部待处理题目，可重新识别或重新上传')
+    return
+  }
+  if (current.value >= items.value.length) current.value = items.value.length - 1
+  loadCurrent()
+  ElMessage.success('已从待处理列表移除')
+}
+
 async function addByNo() {
   let no = ''
   try {
@@ -328,8 +370,12 @@ async function addByNo() {
     }
     q.is_wrong = true
     q.done = false
+    attachToNearestGroup(q, items.value)
+    syncFormToItem(current.value)
     items.value.push(q)
-    current.value = items.value.length - 1
+    items.value = sortQuestionsByNo(items.value)
+    const index = items.value.indexOf(q)
+    current.value = index >= 0 ? index : items.value.length - 1
     loadCurrent()
     ElMessage.success(`已补充第 ${q.no || no} 题`)
   } catch (e) {
@@ -368,7 +414,34 @@ function loadCurrent() {
   Object.assign(form, buildQuestionForm(q, setIds))
 }
 
+/** 切题前把表单里的修改写回题目，避免编辑内容丢失、也保证整体保存取到最新内容。 */
+function syncFormToItem(index = current.value) {
+  const item = items.value[index]
+  if (!item) return
+  Object.assign(item, {
+    no: form.no,
+    title: form.title,
+    stem: form.stem,
+    my_answer: form.my_answer,
+    correct_answer: form.correct_answer,
+    explanation: form.explanation,
+    reason: form.reason,
+    knowledge: form.knowledge_tags
+      .split(/[、,，]/)
+      .map((x) => x.trim())
+      .filter(Boolean),
+    unit_ids: form.unit_ids,
+  })
+}
+
+function onJump(index) {
+  syncFormToItem(current.value)
+  current.value = index
+  loadCurrent()
+}
+
 function next() {
+  syncFormToItem(current.value)
   const remain = items.value.findIndex((it, i) => i > current.value && !it.done)
   if (remain >= 0) {
     current.value = remain
@@ -424,32 +497,43 @@ async function saveScreenshot() {
 async function persist(screenshotOnly) {
   saving.value = true
   try {
+    syncFormToItem(current.value)
     const q = items.value[current.value] || {}
+    const group = buildGroupAggregate(items.value, current.value)
+    const members = group ? groupSiblings(items.value, current.value) : [q]
     const payload = {
       child_id: props.childId,
       set_ids: form.set_ids,
-      question_no: form.no,
-      stem: screenshotOnly ? '' : form.stem,
-      my_answer: screenshotOnly ? '' : form.my_answer,
-      correct_answer: screenshotOnly ? '' : form.correct_answer,
-      explanation: screenshotOnly ? '' : form.explanation,
-      reason: screenshotOnly ? '' : form.reason,
-      knowledge_tags: screenshotOnly ? '' : form.knowledge_tags,
+      question_no: group?.question_no || form.no,
+      title: screenshotOnly ? '' : (group ? group.title : form.title),
+      stem: screenshotOnly ? '' : (group ? group.stem : form.stem),
+      my_answer: screenshotOnly ? '' : (group ? group.my_answer : form.my_answer),
+      correct_answer: screenshotOnly ? '' : (group ? group.correct_answer : form.correct_answer),
+      explanation: screenshotOnly ? '' : (group ? group.explanation : form.explanation),
+      reason: screenshotOnly ? '' : (group ? group.reason : form.reason),
+      knowledge_tags: screenshotOnly ? '' : (group ? group.knowledge.join('、') : form.knowledge_tags),
       unit_ids: screenshotOnly ? [] : form.unit_ids,
       source_type: 'ai',
       source_score_id: props.sourceScoreId,
       source_image_id: props.sourceImageId,
       image_filename: pickedFile.value ? null : filenameFromUrl(props.imageUrl),
-      figure_filename: screenshotOnly ? null : (q.figure_filename || null),
+      figure_filename: screenshotOnly ? null : (group?.figure_filename || q.figure_filename || null),
       mastered: false,
     }
     const fd = new FormData()
     fd.append('payload', JSON.stringify(payload))
     if (pickedFile.value) fd.append('file', pickedFile.value)
     await api.post('/mistakes', fd, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 120000 })
+    const merged = group && members.length > 1
+    members.forEach((it) => { if (it) it.done = true })
     addedCount.value += 1
-    items.value[current.value].done = true
-    ElMessage.success(screenshotOnly ? '已仅存截图' : '已加入错题集')
+    ElMessage.success(
+      screenshotOnly
+        ? '已仅存截图'
+        : merged
+          ? `已将本大题 ${members.length} 道错题合并保存`
+          : '已加入错题集',
+    )
     next()
   } catch (e) {
     ElMessage.error(errMsg(e))
@@ -561,11 +645,17 @@ function filenameFromUrl(url) {
   gap: 16px;
 }
 .src-big {
+  display: block;
   width: 100%;
   max-height: 420px;
   object-fit: contain;
   border-radius: 6px;
   border: 1px solid #ebeef5;
+  cursor: zoom-in;
+}
+.src-big :deep(.el-image__inner) {
+  max-height: 420px;
+  object-fit: contain;
 }
 .figure-img {
   max-width: 100%;
