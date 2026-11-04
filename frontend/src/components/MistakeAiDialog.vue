@@ -50,6 +50,7 @@
               <el-option v-for="(q, i) in items" :key="i" :value="i" :label="questionOptionLabel(q, i)" />
             </el-select>
             <el-button size="small" type="primary" plain :loading="adding" @click="addByNo">手动添加</el-button>
+            <el-button size="small" plain @click="reRecognize">重新识别</el-button>
           </div>
           <el-tag size="small" type="info">{{ form.no ? `第 ${form.no} 题` : '未标题号' }}</el-tag>
         </div>
@@ -336,6 +337,21 @@ async function addByNo() {
   } finally {
     adding.value = false
   }
+}
+
+async function reRecognize() {
+  if (addedCount.value > 0) {
+    try {
+      await ElMessageBox.confirm(
+        `已保存 ${addedCount.value} 道错题，重新识别只重置当前待处理列表，不会删除已保存的内容。`,
+        '重新识别',
+        { type: 'warning', confirmButtonText: '重新识别', cancelButtonText: '取消' },
+      )
+    } catch {
+      return
+    }
+  }
+  await recognize()
 }
 
 function startEdit() {
