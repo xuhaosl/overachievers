@@ -235,3 +235,86 @@ class AiMessage(Base):
     role: Mapped[str] = mapped_column(String(20))  # user / assistant
     content: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+# ---------- 错题整理 ----------
+mistake_set_links = Table(
+    "mistake_set_links",
+    Base.metadata,
+    Column("mistake_id", ForeignKey("mistakes.id"), primary_key=True),
+    Column("set_id", ForeignKey("mistake_sets.id"), primary_key=True),
+)
+
+
+class MistakeNotebook(Base):
+    """错题本：归属某个孩子，名称由用户自建（不锁学科）。"""
+
+    __tablename__ = "mistake_notebooks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    child_id: Mapped[int] = mapped_column(ForeignKey("children.id"))
+    name: Mapped[str] = mapped_column(String(100))
+    sort_no: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    child: Mapped["Child"] = relationship()
+    sets: Mapped[list["MistakeSet"]] = relationship(
+        back_populates="notebook", cascade="all, delete-orphan", order_by="MistakeSet.sort_no, MistakeSet.id"
+    )
+
+
+class MistakeSet(Base):
+    """错题集：错题本下的分组（如「五上错题集」）。"""
+
+    __tablename__ = "mistake_sets"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    notebook_id: Mapped[int] = mapped_column(ForeignKey("mistake_notebooks.id"))
+    name: Mapped[str] = mapped_column(String(100))
+    sort_no: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    notebook: Mapped["MistakeNotebook"] = relationship(back_populates="sets")
+
+
+class Mistake(Base):
+    """错题：题干或图片至少一项；必须至少加入一个错题集；掌握状态两态。"""
+
+    __tablename__ = "mistakes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    child_id: Mapped[int] = mapped_column(ForeignKey("children.id"))
+    question_no: Mapped[str] = mapped_column(String(20), default="")  # 题号，如 3、三(1)
+    stem: Mapped[str] = mapped_column(Text, default="")  # 题干文字
+    my_answer: Mapped[str] = mapped_column(Text, default="")  # 我的答案
+    correct_answer: Mapped[str] = mapped_column(Text, default="")  # 正确答案
+    explanation: Mapped[str] = mapped_column(Text, default="")  # 解析
+    reason: Mapped[str] = mapped_column(Text, default="")  # 错因
+    knowledge_tags: Mapped[str] = mapped_column(String(300), default="")  # 自由知识点，顿号分隔
+    unit_ids: Mapped[str] = mapped_column(Text, default="[]")  # 关联的系统单元 ID（JSON 数组）
+    image_filename: Mapped[str | None] = mapped_column(String(200), nullable=True)  # 本地图片文件名
+    image_owned: Mapped[bool] = mapped_column(Boolean, default=False)  # 图片是否由错题自己上传（删除时清理文件）
+    figure_filename: Mapped[str | None] = mapped_column(String(200), nullable=True)  # 题目配图（AI 从原图裁出的图形）
+    figure_owned: Mapped[bool] = mapped_column(Boolean, default=False)  # 配图是否由错题自己生成（删除时清理文件）
+    source_type: Mapped[str] = mapped_column(String(20), default="manual")  # score / ai / manual
+    source_score_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source_image_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    mastered: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    child: Mapped["Child"] = relationship()
+    sets: Mapped[list["MistakeSet"]] = relationship(
+        secondary=mistake_set_links, lazy="selectin", order_by="MistakeSet.sort_no, MistakeSet.id"
+    )
+
+
+class MistakeSearchConfig(Base):
+    """原题联网检索配置（本期预留，未配置时跳过检索）。"""
+
+    __tablename__ = "mistake_search_configs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    provider: Mapped[str] = mapped_column(String(30), default="tavily")  # tavily / serper / bing
+    api_key: Mapped[str] = mapped_column(String(200), default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())

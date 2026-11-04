@@ -107,6 +107,10 @@
               <span class="img-name">{{ img.original_name || '图片' }}</span>
               <el-button size="small" type="danger" text @click="delImage(img)">删除</el-button>
             </div>
+            <div class="img-actions">
+              <el-button size="small" text type="primary" :icon="MagicStick" @click="openMistakeAi(img)">AI 识别</el-button>
+              <el-button size="small" text @click="addToMistakes(img)">加入错题集</el-button>
+            </div>
           </div>
         </div>
       </el-card>
@@ -114,6 +118,21 @@
 
     <!-- 编辑成绩 -->
     <ScoreEditDialog v-model="showEdit" :score="s" @saved="load" />
+
+    <!-- 错题：AI 识别 / 直接加入错题集 -->
+    <MistakeAiDialog
+      v-model="mistakeAiVisible"
+      :child-id="s?.child_id"
+      :source-score-id="s?.id"
+      :source-image-id="mistakeImage?.id"
+      :image-url="mistakeImage?.url || ''"
+    />
+    <MistakeEditDialog
+      v-model="mistakeEditVisible"
+      :child-id="s?.child_id"
+      :defaults="mistakeDefaults"
+      @saved="onMistakeSaved"
+    />
   </div>
 </template>
 
@@ -121,10 +140,12 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { ChatDotRound } from '@element-plus/icons-vue'
+import { ChatDotRound, MagicStick } from '@element-plus/icons-vue'
 import { api, errMsg } from '../api'
 import { gradeLabel, ratePercent, rankText, shortTerm } from '../utils'
 import ScoreEditDialog from '../components/ScoreEditDialog.vue'
+import MistakeAiDialog from '../components/MistakeAiDialog.vue'
+import MistakeEditDialog from '../components/MistakeEditDialog.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -133,6 +154,29 @@ const images = ref([])
 const loading = ref(true)
 const uploading = ref(false)
 const showEdit = ref(false)
+const mistakeAiVisible = ref(false)
+const mistakeEditVisible = ref(false)
+const mistakeImage = ref(null)
+const mistakeDefaults = ref({})
+
+function openMistakeAi(img) {
+  mistakeImage.value = img
+  mistakeAiVisible.value = true
+}
+
+function addToMistakes(img) {
+  mistakeDefaults.value = {
+    imageUrl: img.url,
+    sourceScoreId: s.value?.id,
+    sourceImageId: img.id,
+    setIds: [],
+  }
+  mistakeEditVisible.value = true
+}
+
+function onMistakeSaved() {
+  ElMessage.success('已加入错题整理')
+}
 
 // 标题：阶段年级学期学科单元，如"某年级第N学期某学科第N单元"
 const pageTitle = computed(() => {
@@ -330,5 +374,14 @@ onMounted(load)
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.img-actions {
+  display: flex;
+  gap: 0;
+  margin-top: 2px;
+}
+.img-actions :deep(.el-button) {
+  padding: 2px 4px;
+  font-size: 12px;
 }
 </style>

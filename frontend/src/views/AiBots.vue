@@ -28,6 +28,34 @@
       </el-card>
     </div>
 
+    <el-card class="search-card" shadow="never">
+      <template #header>原题检索（预留）</template>
+      <p class="hint">
+        错题 AI 识别后可联网查找原题（先联网、查不到再由 AI 自组织）。本期仅保留配置入口：未填 Key 时自动跳过联网检索，不影响错题整理。
+      </p>
+      <el-form inline>
+        <el-form-item label="服务商">
+          <el-select v-model="searchConfig.provider" style="width: 150px">
+            <el-option label="Tavily" value="tavily" />
+            <el-option label="Serper" value="serper" />
+            <el-option label="Bing" value="bing" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="API Key">
+          <el-input
+            v-model="searchConfig.api_key"
+            type="password"
+            show-password
+            style="width: 260px"
+            :placeholder="searchConfig.configured ? `已配置 ${searchConfig.api_key_masked}，留空保留` : '暂未接入，可先留空'"
+          />
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" :loading="savingSearch" @click="saveSearchConfig">保存</el-button>
+        </el-form-item>
+      </el-form>
+    </el-card>
+
     <!-- 添加/编辑 -->
     <el-dialog v-model="editVisible" :title="form.id ? '编辑机器人' : '添加机器人'" width="480px">
       <el-form :model="form" label-width="90px">
@@ -115,11 +143,13 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { Plus } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { aiApi, confirmDelete, errMsg } from '../api'
+import { aiApi, api, confirmDelete, errMsg } from '../api'
 
 const bots = ref([])
 const providers = ref([])
 const loaded = ref(false)
+const searchConfig = ref({ provider: 'tavily', api_key: '', api_key_masked: '', configured: false })
+const savingSearch = ref(false)
 
 const editVisible = ref(false)
 const form = ref({})
@@ -148,12 +178,34 @@ function fmtTime(t) {
 }
 
 async function load() {
-  const [b, p] = await Promise.all([aiApi.bots(), aiApi.providers()])
+  const [b, p, sc] = await Promise.all([
+    aiApi.bots(),
+    aiApi.providers(),
+    api.get('/mistakes/search-config'),
+  ])
   bots.value = b.data
   providers.value = p.data
+  searchConfig.value = { ...sc.data, api_key: '' }
   loaded.value = true
 }
 onMounted(load)
+
+async function saveSearchConfig() {
+  savingSearch.value = true
+  try {
+    await api.put('/mistakes/search-config', {
+      provider: searchConfig.value.provider,
+      api_key: searchConfig.value.api_key,
+    })
+    const { data } = await api.get('/mistakes/search-config')
+    searchConfig.value = { ...data, api_key: '' }
+    ElMessage.success('已保存')
+  } catch (e) {
+    ElMessage.error(errMsg(e))
+  } finally {
+    savingSearch.value = false
+  }
+}
 
 function onProviderChange(key) {
   const p = providers.value.find((x) => x.key === key)

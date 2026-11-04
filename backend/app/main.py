@@ -10,6 +10,7 @@ from .uploads import UPLOAD_DIR
 from .routers import auth as auth_router
 from .routers import backup, children, classes, exams, scores, stats, subjects, update
 from .routers import ai as ai_router
+from .routers import mistakes as mistakes_router
 
 # 首次启动自动建表
 Base.metadata.create_all(bind=engine)
@@ -51,6 +52,10 @@ def _migrate():
         },
         "ai_messages": {
             "conversation_id": "INTEGER",  # 归属会话；旧数据由下方回填
+        },
+        "mistakes": {
+            "figure_filename": "VARCHAR(200)",
+            "figure_owned": "BOOLEAN DEFAULT 0",
         },
     }
     with engine.begin() as conn:
@@ -320,6 +325,7 @@ app.include_router(stats.router, prefix="/api")
 app.include_router(backup.router, prefix="/api")
 app.include_router(update.router, prefix="/api")
 app.include_router(ai_router.router, prefix="/api")
+app.include_router(mistakes_router.router, prefix="/api")
 
 # 成绩图片目录（不存在则创建），通过 /uploads/<文件名> 访问
 # 与上传/删除共用同一目录定义，避免写入 DATA_DIR 却从 backend/data 提供文件导致 404

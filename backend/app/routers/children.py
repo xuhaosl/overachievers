@@ -5,9 +5,9 @@ from sqlalchemy.orm import Session
 from ..auth import AuthDep
 from ..database import get_db
 from ..grading import stage_grade_at
-from ..models import Child, Exam, SchoolClass, Score
+from ..models import Child, Exam, Mistake, MistakeNotebook, SchoolClass, Score
 from ..schemas import ChildIn, ChildWithCount, ScoreIds
-from ..uploads import remove_score_image_files
+from ..uploads import UPLOAD_DIR, remove_score_image_files
 
 router = APIRouter(prefix="/children", tags=["children"], dependencies=[AuthDep])
 
@@ -92,9 +92,26 @@ def delete_child(
         raise HTTPException(404, "孩子不存在")
     score_n = db.scalar(select(func.count(Score.id)).where(Score.child_id == child_id)) or 0
     exam_n = db.scalar(select(func.count(Exam.id)).where(Exam.child_id == child_id)) or 0
-    if (score_n or exam_n) and not confirm:
-        raise HTTPException(409, f"该孩子下有 {exam_n} 场考试、{score_n} 条成绩，删除将一并清除")
+    mistake_n = db.scalar(select(func.count(Mistake.id)).where(Mistake.child_id == child_id)) or 0
+    if (score_n or exam_n or mistake_n) and not confirm:
+        raise HTTPException(
+            409, f"该孩子下有 {exam_n} 场考试、{score_n} 条成绩、{mistake_n} 道错题，删除将一并清除"
+        )
     remove_score_image_files(db, db.scalars(select(Score).where(Score.child_id == child_id)).all())
+    # 级联删除错题本（含集与错题），并清理错题自己上传的图片文件
+    for m in db.scalars(select(Mistake).where(Mistake.child_id == child_id)).all():
+        if m.image_owned and m.image_filename:
+            try:
+                (UPLOAD_DIR / m.image_filename).unlink(missing_ok=True)
+            except OSError:
+                pass
+        db.delete(m)
+    if mistake_n:
+        db.flush()
+    for nb in db.scalars(select(MistakeNotebook).where(MistakeNotebook.child_id == child_id)).all():
+        for st in list(nb.sets):
+            db.delete(st)
+        db.delete(nb)
     # 级联删除孩子的班级记录（就读经历），避免留下归属为空的孤儿记录
     for c in db.scalars(select(SchoolClass).where(SchoolClass.child_id == child_id)).all():
         db.delete(c)

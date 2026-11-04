@@ -9,7 +9,20 @@ from sqlalchemy.orm import Session
 
 from ..auth import AuthDep
 from ..database import get_db
-from ..models import Child, Exam, SchoolClass, Score, ScoreImage, Subject, SubjectTerm, Unit
+from ..models import (
+    Child,
+    Exam,
+    Mistake,
+    MistakeNotebook,
+    MistakeSearchConfig,
+    MistakeSet,
+    SchoolClass,
+    Score,
+    ScoreImage,
+    Subject,
+    SubjectTerm,
+    Unit,
+)
 
 router = APIRouter(prefix="/backup", tags=["backup"], dependencies=[AuthDep])
 
@@ -23,6 +36,10 @@ TABLES = [
     ("exams", Exam),
     ("scores", Score),
     ("score_images", ScoreImage),
+    ("mistake_notebooks", MistakeNotebook),
+    ("mistake_sets", MistakeSet),
+    ("mistakes", Mistake),
+    ("mistake_search_configs", MistakeSearchConfig),
 ]
 
 
@@ -45,6 +62,11 @@ def export_data(db: Session = Depends(get_db)):
     data["tables"]["score_units"] = [
         {"score_id": r[0], "unit_id": r[1]}
         for r in db.execute(select(Table("score_units", MetaData(), autoload_with=db.connection())))
+    ]
+    # 错题↔错题集 多对多关联表
+    data["tables"]["mistake_set_links"] = [
+        {"mistake_id": r[0], "set_id": r[1]}
+        for r in db.execute(select(Table("mistake_set_links", MetaData(), autoload_with=db.connection())))
     ]
     fname = f"backup_{datetime.now():%Y%m%d_%H%M%S}.json"
     content = json.dumps(data, ensure_ascii=False, default=str)
@@ -89,6 +111,7 @@ async def import_data(file: UploadFile = File(...), db: Session = Depends(get_db
 
     # 清空现有数据（先删关联表和被引用表）
     db.execute(delete(Table("score_units", MetaData(), autoload_with=db.connection())))
+    db.execute(delete(Table("mistake_set_links", MetaData(), autoload_with=db.connection())))
     for _, model in reversed(TABLES):
         db.execute(delete(model))
 
@@ -99,8 +122,12 @@ async def import_data(file: UploadFile = File(...), db: Session = Depends(get_db
     su = Table("score_units", MetaData(), autoload_with=db.connection())
     for row in tables.get("score_units", []):
         db.execute(insert(su).values(score_id=row.get("score_id"), unit_id=row.get("unit_id")))
+    msl = Table("mistake_set_links", MetaData(), autoload_with=db.connection())
+    for row in tables.get("mistake_set_links", []):
+        db.execute(insert(msl).values(mistake_id=row.get("mistake_id"), set_id=row.get("set_id")))
     db.commit()
 
     counts = {name: len(tables.get(name, [])) for name, _ in TABLES}
     counts["score_units"] = len(tables.get("score_units", []))
+    counts["mistake_set_links"] = len(tables.get("mistake_set_links", []))
     return {"ok": True, "counts": counts}

@@ -74,9 +74,10 @@ import {
   Download,
   ChatDotRound,
   InfoFilled,
+  Collection,
 } from '@element-plus/icons-vue'
 
-const icons = { HomeFilled, EditPen, List, Tickets, TrendCharts, User, Reading, Setting, OfficeBuilding, Download, ChatDotRound, InfoFilled }
+const icons = { HomeFilled, EditPen, List, Tickets, TrendCharts, User, Reading, Setting, OfficeBuilding, Download, ChatDotRound, InfoFilled, Collection }
 const route = useRoute()
 const router = useRouter()
 const routes = computed(() =>
