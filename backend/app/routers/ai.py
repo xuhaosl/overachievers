@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -17,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from ..auth import AuthDep
 from ..database import get_db
-from ..models import AiBot, AiConversation, AiMessage, Child, Exam, Score, Subject
+from ..models import AiBot, AiConversation, AiMessage, Child, Exam, Mistake, Score, Subject
 
 router = APIRouter(prefix="/ai", tags=["ai"], dependencies=[AuthDep])
 
@@ -319,7 +320,37 @@ def _fmt_score_row(s: Score) -> str:
     return " | ".join(parts)
 
 
-def _fmt_exam_row(e: Exam, scores: list[Score]) -> str:
+def _clip(text: str, limit: int = 60) -> str:
+    t = re.sub(r"\s+", " ", str(text or "")).strip()
+    return t[:limit] + ("…" if len(t) > limit else "")
+
+
+def _fmt_mistake_rows(db: Session, score_ids: list[int]) -> list[str]:
+    """范围内成绩关联的错题：AI 写评语时据此归因、指出具体薄弱点。"""
+    if not score_ids:
+        return []
+    rows = db.scalars(
+        select(Mistake).where(Mistake.source_score_id.in_(list(dict.fromkeys(score_ids)))).order_by(Mistake.id).limit(30)
+    ).all()
+    if not rows:
+        return []
+    lines = [f"  本范围关联错题（{len(rows)} 道，评语需结合这些错因与知识点）："]
+    for m in rows:
+        head = " ".join(x for x in (f"第{m.question_no}题" if m.question_no else "", m.title or "") if x).strip() or "错题"
+        detail = []
+        if m.reason:
+            detail.append(f"错因 {_clip(m.reason)}")
+        if m.knowledge_tags:
+            detail.append(f"知识点 {_clip(m.knowledge_tags, 40)}")
+        if m.my_answer:
+            detail.append(f"作答 {_clip(m.my_answer, 40)}")
+        if m.correct_answer:
+            detail.append(f"正确答案 {_clip(m.correct_answer, 40)}")
+        lines.append("  - " + head + ("｜" + "｜".join(detail) if detail else ""))
+    return lines
+
+
+def _fmt_exam_row(e: Exam, scores: list[Score], db: Session | None = None) -> str:
     parts = [
         f"日期 {e.date}",
         f"类型 {e.type}",
@@ -342,6 +373,8 @@ def _fmt_exam_row(e: Exam, scores: list[Score]) -> str:
         parts.append(f"AI评语 {e.ai_comment}")
     lines = ["场次「%s」：" % e.name + " | ".join(parts)]
     lines += ["  " + _fmt_score_row(s) for s in scores]
+    if db and scores:
+        lines += _fmt_mistake_rows(db, [s.id for s in scores])
     return "\n".join(lines)
 
 
@@ -377,11 +410,12 @@ def build_context(db: Session, scope: dict) -> str:
     blocks = []
     for child in children:
         lines: list[str] = []
+        mistake_lines: list[str] = []
         if exam_id:
             e = db.get(Exam, exam_id)
             if e and e.child_id == child.id:
                 scores = db.scalars(select(Score).where(Score.exam_id == exam_id).order_by(Score.id)).all()
-                lines.append(_fmt_exam_row(e, scores))
+                lines.append(_fmt_exam_row(e, scores, db))
         else:
             q = select(Score).where(Score.child_id == child.id)
             if subject_id:
@@ -390,16 +424,19 @@ def build_context(db: Session, scope: dict) -> str:
                 q = q.where(Score.date >= date_from)
             if date_to:
                 q = q.where(Score.date <= date_to)
-            lines = [_fmt_score_row(s) for s in db.scalars(q.order_by(Score.date, Score.id).limit(100)).all()]
+            scores_in_range = list(db.scalars(q.order_by(Score.date, Score.id).limit(100)).all())
+            lines = [_fmt_score_row(s) for s in scores_in_range]
+            mistake_lines = _fmt_mistake_rows(db, [s.id for s in scores_in_range])
 
         full = None if exam_id else _child_full_rows(db, child.id)
+        detail = "\n".join(lines + mistake_lines)
         # 未选孩子（家长可能问任一学期/科目）或范围内明细太少 → 都必须给全历史
         need_full = (not child_id) or (full and len(lines) <= 5)
 
         if full and need_full and len(full) > len(lines):
             if lines and has_filter:
                 blocks.append(
-                    f"【孩子「{child.name}」·当前范围明细】（{len(lines)} 条）：\n" + "\n".join(lines)
+                    f"【孩子「{child.name}」·当前范围明细】（{len(lines)} 条）：\n" + detail
                     + f"\n【孩子「{child.name}」·全历史成绩概览】（全部 {len(full)} 条，每条带学期/日期，可据此理解\"本学期\"等说法）：\n"
                     + "\n".join(full)
                 )
@@ -409,7 +446,7 @@ def build_context(db: Session, scope: dict) -> str:
                     + "\n".join(full)
                 )
         else:
-            body = "\n".join(lines) if lines else "（该范围内无成绩记录）"
+            body = detail if (lines or mistake_lines) else "（该范围内无成绩记录）"
             blocks.append(f"【孩子「{child.name}」成绩】（{len(lines)} 条）：\n" + body)
 
     # 选定了某个孩子时，附加其他孩子的成绩概览：AI 才能回答"和 XX 相比"这类跨孩子问题
@@ -437,6 +474,7 @@ SYSTEM_PROMPT = (
     "用户明确要求详细分析时才展开）；可用少量短列表和加粗突出重点，不要堆砌标题和嵌套结构；数据不足时如实说明。"
     "当用户要求为某条成绩/某场考试写评语时，用一段 50 字以内、鼓励为主且指出改进方向的评语，"
     "并用 <comment></comment> 标签把评语正文包裹起来，评语正文里不要有换行。"
+    "若数据中出现「本范围关联错题」，评语必须结合其中的具体错因/知识点（指出薄弱点），不要只写空泛鼓励。"
 )
 
 SSE_ERROR = "data: {\"ai_error\": \"%s\"}\n\n"
