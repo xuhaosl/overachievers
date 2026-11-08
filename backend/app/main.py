@@ -58,6 +58,9 @@ def _migrate():
             "figure_filename": "VARCHAR(200)",
             "figure_owned": "BOOLEAN DEFAULT 0",
         },
+        "score_images": {
+            "sort_no": "INTEGER DEFAULT 0",
+        },
     }
     with engine.begin() as conn:
         for table, cols in add_plan.items():

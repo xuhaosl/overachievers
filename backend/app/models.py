@@ -193,6 +193,7 @@ class ScoreImage(Base):
     score_id: Mapped[int] = mapped_column(ForeignKey("scores.id"))
     filename: Mapped[str] = mapped_column(String(200))  # data/uploads 下的文件名
     original_name: Mapped[str] = mapped_column(String(200), default="")
+    sort_no: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     score: Mapped["Score"] = relationship(back_populates="images")

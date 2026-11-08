@@ -1,6 +1,7 @@
 from datetime import date as date_type
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
 
@@ -236,8 +237,28 @@ async def upload_score_image(score_id: int, file: UploadFile = File(...), db: Se
 def list_score_images(score_id: int, db: Session = Depends(get_db)):
     if not db.get(Score, score_id):
         raise HTTPException(404, "成绩不存在")
-    rows = db.scalars(select(ScoreImage).where(ScoreImage.score_id == score_id).order_by(ScoreImage.id)).all()
+    rows = db.scalars(
+        select(ScoreImage).where(ScoreImage.score_id == score_id).order_by(ScoreImage.sort_no, ScoreImage.id)
+    ).all()
     return [image_out(i) for i in rows]
+
+
+class ImageOrderIn(BaseModel):
+    ids: list[int] = []
+
+
+@router.patch("/{score_id}/images/order")
+def reorder_score_images(score_id: int, body: ImageOrderIn, db: Session = Depends(get_db)):
+    if not db.get(Score, score_id):
+        raise HTTPException(404, "成绩不存在")
+    rows = db.scalars(select(ScoreImage).where(ScoreImage.score_id == score_id)).all()
+    by_id = {i.id: i for i in rows}
+    if set(body.ids) != set(by_id):
+        raise HTTPException(400, "图片列表已变化，请刷新后重试")
+    for idx, image_id in enumerate(body.ids):
+        by_id[image_id].sort_no = idx
+    db.commit()
+    return {"ok": True}
 
 
 @router.delete("/images/{image_id}")

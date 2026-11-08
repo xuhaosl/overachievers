@@ -113,7 +113,18 @@
         </template>
 
         <div v-if="images.length || linkedMistakes.length" class="img-grid">
-          <div v-for="img in images" :key="'img-' + img.id" class="img-item">
+          <div
+            v-for="(img, idx) in images"
+            :key="'img-' + img.id"
+            class="img-item"
+            :class="{ dragging: dragIndex === idx, 'drag-over': dragOverIndex === idx }"
+            draggable="true"
+            @dragstart="onDragStart(idx, $event)"
+            @dragover.prevent="onDragOver(idx)"
+            @dragleave="onDragLeave(idx)"
+            @drop.prevent="onDrop(idx)"
+            @dragend="onDragEnd"
+          >
             <el-image
               :src="img.url"
               :preview-src-list="images.map((i) => i.url)"
@@ -226,6 +237,9 @@ const route = useRoute()
 const router = useRouter()
 const s = ref(null)
 const images = ref([])
+// 试卷图片拖动排序
+const dragIndex = ref(-1)
+const dragOverIndex = ref(-1)
 const loading = ref(true)
 const uploading = ref(false)
 const showEdit = ref(false)
@@ -503,6 +517,44 @@ async function delImage(img) {
   }
 }
 
+function onDragStart(idx, e) {
+  dragIndex.value = idx
+  if (e.dataTransfer) {
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', String(idx))
+  }
+}
+
+function onDragOver(idx) {
+  if (dragIndex.value >= 0 && dragIndex.value !== idx) dragOverIndex.value = idx
+}
+
+function onDragLeave(idx) {
+  if (dragOverIndex.value === idx) dragOverIndex.value = -1
+}
+
+function onDragEnd() {
+  dragIndex.value = -1
+  dragOverIndex.value = -1
+}
+
+async function onDrop(idx) {
+  const from = dragIndex.value
+  dragIndex.value = -1
+  dragOverIndex.value = -1
+  if (from < 0 || from === idx) return
+  const list = images.value.slice()
+  const [moved] = list.splice(from, 1)
+  list.splice(idx, 0, moved)
+  images.value = list
+  try {
+    await api.patch(`/scores/${route.params.id}/images/order`, { ids: list.map((i) => i.id) })
+  } catch (e) {
+    ElMessage.error(errMsg(e))
+    images.value = (await api.get(`/scores/${route.params.id}/images`)).data
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -599,7 +651,16 @@ onMounted(load)
   border: 1px solid #ebeef5;
   border-radius: 8px;
   background: #fff;
-  transition: box-shadow 0.2s, border-color 0.2s;
+  cursor: grab;
+  transition: box-shadow 0.2s, border-color 0.2s, opacity 0.2s;
+}
+.img-item.dragging {
+  opacity: 0.45;
+  cursor: grabbing;
+}
+.img-item.drag-over {
+  border-color: #409eff;
+  box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.15);
 }
 .img-item:hover {
   border-color: #dcdfe6;

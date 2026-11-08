@@ -7,6 +7,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import HTTPException
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .database import DATA_DIR
@@ -23,7 +24,8 @@ def save_score_image(db: Session, score_id: int, upload) -> ScoreImage:
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     name = f"{uuid.uuid4().hex}{ext}"
     (UPLOAD_DIR / name).write_bytes(upload.file.read())
-    img = ScoreImage(score_id=score_id, filename=name, original_name=upload.filename or "")
+    max_no = db.scalar(select(func.max(ScoreImage.sort_no)).where(ScoreImage.score_id == score_id)) or 0
+    img = ScoreImage(score_id=score_id, filename=name, original_name=upload.filename or "", sort_no=max_no + 1)
     db.add(img)
     db.commit()
     return img
