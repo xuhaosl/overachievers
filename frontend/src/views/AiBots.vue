@@ -90,6 +90,35 @@
             <el-option v-for="m in currentProvider?.models || []" :key="m" :value="m" :label="m" />
           </el-select>
         </el-form-item>
+        <el-form-item label="温度">
+          <el-slider v-model="form.temperature" :min="0" :max="2" :step="0.1" show-input />
+        </el-form-item>
+        <el-form-item label="最大输出">
+          <el-input-number v-model="form.max_tokens" :min="64" :max="200000" :step="256" style="width: 160px" />
+          <span class="hint inline">tokens</span>
+        </el-form-item>
+        <el-form-item label="超时">
+          <el-input-number v-model="form.timeout" :min="5" :max="600" :step="5" style="width: 160px" />
+          <span class="hint inline">秒</span>
+        </el-form-item>
+        <el-form-item label="故障回退">
+          <el-select v-model="form.fallback_bot_id" clearable placeholder="主模型失败时改用" style="width: 100%">
+            <el-option v-for="b in bots.filter((x) => x.id !== form.id)" :key="b.id" :value="b.id"
+                       :label="`${b.name}（${b.model}）`" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="额外请求头">
+          <el-input
+            v-model="form.extra_headers"
+            type="textarea"
+            :rows="2"
+            placeholder='JSON，如 {"HTTP-Referer": "https://example.com"}'
+          />
+        </el-form-item>
+        <el-form-item label="启用 / 默认">
+          <el-switch v-model="form.enabled" active-text="启用" inline-prompt />
+          <el-switch v-model="form.is_default" active-text="默认" inline-prompt style="margin-left: 12px" />
+        </el-form-item>
         <el-form-item label=" ">
           <el-button :loading="testing" @click="testConnection">测试连接</el-button>
           <span v-if="testResult" class="test-result" :class="{ ok: testResult.ok }">
@@ -100,6 +129,143 @@
       <template #footer>
         <el-button @click="editVisible = false">取消</el-button>
         <el-button type="primary" @click="saveBot">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- Agent 配置 -->
+    <el-card class="agent-card" shadow="never">
+      <template #header>
+        <div class="agent-head">
+          <span>Agent 配置</span>
+          <el-button size="small" type="primary" :icon="Plus" @click="openProfile()">新增配置</el-button>
+        </div>
+      </template>
+      <p class="hint">
+        每个配置决定 Agent 能用哪些工具、是否允许写入、是否需要二次确认，以及独立的隐私级别。
+        写工具默认需要确认；勾选“自动执行”会跳过确认，请谨慎使用。
+      </p>
+      <el-table :data="profiles" size="small">
+        <el-table-column prop="name" label="名称" width="140" />
+        <el-table-column label="绑定机器人" width="160">
+          <template #default="{ row }">{{ botName(row.bot_id) }}</template>
+        </el-table-column>
+        <el-table-column label="工具" width="120">
+          <template #default="{ row }">
+            {{ row.tools?.length ? `${row.tools.length} 个` : '全部' }}
+          </template>
+        </el-table-column>
+        <el-table-column label="写入" width="90">
+          <template #default="{ row }">{{ row.allow_write ? '允许' : '只读' }}</template>
+        </el-table-column>
+        <el-table-column label="确认" width="100">
+          <template #default="{ row }">{{ row.auto_approve ? '自动执行' : '需确认' }}</template>
+        </el-table-column>
+        <el-table-column label="隐私" width="100">
+          <template #default="{ row }">{{ row.privacy_level || '默认' }}</template>
+        </el-table-column>
+        <el-table-column label="操作" width="140">
+          <template #default="{ row }">
+            <el-button size="small" text @click="openProfile(row)">编辑</el-button>
+            <el-button size="small" text type="danger" @click="removeProfile(row)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-card>
+
+    <!-- 隐私与安全 -->
+    <el-card class="agent-card" shadow="never">
+      <template #header>
+        <div class="agent-head">
+          <span>儿童隐私脱敏</span>
+          <el-tag size="small" :type="guardTagType">{{ guardTagText }}</el-tag>
+        </div>
+      </template>
+      <p class="hint">
+        发送给第三方模型前，本地会把孩子姓名、学校、班级、学号、电话、邮箱、地址等替换成稳定占位符
+        <code v-text="placeholderSample"></code>；模型回复中的占位符会在本地还原。
+        架构参考 magpie：占位符可逆、流式分片安全、同一值跨轮次一致。
+      </p>
+      <el-descriptions :column="2" size="small" border>
+        <el-descriptions-item label="密钥加密">
+          {{ privacy.secret?.scheme || '-' }}（来源 {{ privacy.secret?.key_source || '-' }}）
+        </el-descriptions-item>
+        <el-descriptions-item label="密钥往返校验">
+          {{ privacy.roundtrip_ok ? '正常' : '异常' }}
+        </el-descriptions-item>
+        <el-descriptions-item label="AstrLink Guard">
+          {{ privacy.privacy?.guard?.installed ? '模型文件已就位' : '未安装（使用内置规则）' }}
+        </el-descriptions-item>
+        <el-descriptions-item label="模型目录">
+          {{ privacy.privacy?.guard?.model_dir || '-' }}
+        </el-descriptions-item>
+      </el-descriptions>
+      <div class="preview-box">
+        <el-input
+          v-model="previewText"
+          type="textarea"
+          :rows="3"
+          placeholder="粘贴一段文字，预览脱敏效果（不会发送到任何外部服务）"
+        />
+        <div class="preview-ops">
+          <el-select v-model="previewLevel" size="small" style="width: 130px">
+            <el-option label="标准" value="standard" />
+            <el-option label="严格" value="strict" />
+            <el-option label="不脱敏" value="off" />
+          </el-select>
+          <el-button size="small" type="primary" :loading="previewing" @click="runPreview">预览</el-button>
+        </div>
+        <div v-if="previewResult" class="preview-result">
+          <div class="preview-line"><b>脱敏后：</b>{{ previewResult.redacted }}</div>
+          <div class="preview-line">
+            <b>还原校验：</b>
+            <el-tag size="small" :type="previewResult.roundtrip_ok ? 'success' : 'danger'">
+              {{ previewResult.roundtrip_ok ? '一致' : '不一致' }}
+            </el-tag>
+            <span class="hint inline">{{ previewStats }}</span>
+          </div>
+        </div>
+      </div>
+    </el-card>
+
+    <!-- Agent 配置编辑 -->
+    <el-dialog v-model="profileVisible" :title="profileForm.id ? '编辑 Agent 配置' : '新增 Agent 配置'" width="560px">
+      <el-form :model="profileForm" label-width="100px">
+        <el-form-item label="名称" required>
+          <el-input v-model="profileForm.name" maxlength="50" placeholder="如：数据录入助手" />
+        </el-form-item>
+        <el-form-item label="绑定机器人">
+          <el-select v-model="profileForm.bot_id" clearable style="width: 100%" placeholder="使用哪个 Provider 机器人">
+            <el-option v-for="b in bots" :key="b.id" :value="b.id" :label="`${b.name}（${b.model}）`" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="可用工具">
+          <el-select v-model="profileForm.tools" multiple filterable collapse-tags style="width: 100%"
+                     placeholder="留空 = 全部工具">
+            <el-option v-for="t in allTools" :key="t" :value="t" :label="t" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="隐私级别">
+          <el-select v-model="profileForm.privacy_level" style="width: 100%">
+            <el-option label="跟随全局默认" value="" />
+            <el-option label="不脱敏" value="off" />
+            <el-option label="标准" value="standard" />
+            <el-option label="严格" value="strict" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="写入权限">
+          <el-switch v-model="profileForm.allow_write" active-text="允许新增数据" inline-prompt />
+        </el-form-item>
+        <el-form-item label="执行方式">
+          <el-switch v-model="profileForm.auto_approve" active-text="自动执行" inactive-text="需确认" inline-prompt />
+        </el-form-item>
+        <el-form-item label="附加提示词">
+          <el-input v-model="profileForm.system_prompt" type="textarea" :rows="3"
+                    placeholder="追加到 Agent 系统提示，如“回答尽量简短，多给具体练习建议”" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="profileVisible = false">取消</el-button>
+        <el-button type="primary" @click="saveProfile">保存</el-button>
       </template>
     </el-dialog>
 
@@ -143,13 +309,39 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { Plus } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { aiApi, api, confirmDelete, errMsg } from '../api'
+import { agentApi, aiApi, api, confirmDelete, errMsg } from '../api'
 
 const bots = ref([])
 const providers = ref([])
 const loaded = ref(false)
 const searchConfig = ref({ provider: 'tavily', api_key: '', api_key_masked: '', configured: false })
 const savingSearch = ref(false)
+
+// Agent 配置 / 隐私
+const profiles = ref([])
+const allTools = ref([])
+const privacy = ref({})
+const profileVisible = ref(false)
+const profileForm = ref({})
+const previewText = ref('')
+const previewLevel = ref('standard')
+const previewResult = ref(null)
+const previewing = ref(false)
+const placeholderSample = '{{CHILD_xxxxxxxx}}'
+
+const guardTagType = computed(() => (privacy.value.privacy?.guard?.available ? 'success' : 'info'))
+const guardTagText = computed(() => {
+  const g = privacy.value.privacy?.guard
+  if (!g) return '加载中'
+  if (g.available) return 'AstrLink Guard 可用'
+  if (g.installed) return '模型已就位但缺少运行时'
+  return '内置规则脱敏'
+})
+const previewStats = computed(() => {
+  const counts = previewResult.value?.stats?.counts || {}
+  const parts = Object.entries(counts).map(([k, v]) => `${k}×${v}`)
+  return parts.length ? `已脱敏：${parts.join(' ')}` : '未命中敏感实体'
+})
 
 const editVisible = ref(false)
 const form = ref({})
@@ -178,17 +370,74 @@ function fmtTime(t) {
 }
 
 async function load() {
-  const [b, p, sc] = await Promise.all([
+  const [b, p, sc, pr, tls, st] = await Promise.all([
     aiApi.bots(),
     aiApi.providers(),
     api.get('/mistakes/search-config'),
+    agentApi.profiles(),
+    agentApi.tools(),
+    agentApi.status(),
   ])
   bots.value = b.data
   providers.value = p.data
   searchConfig.value = { ...sc.data, api_key: '' }
+  profiles.value = pr.data || []
+  allTools.value = tls.data?.names || []
+  privacy.value = st.data || {}
   loaded.value = true
 }
 onMounted(load)
+
+// ---------- Agent 配置 ----------
+function botName(id) {
+  return bots.value.find((b) => b.id === id)?.name || '未绑定'
+}
+
+function openProfile(row) {
+  profileForm.value = row
+    ? { ...row, tools: [...(row.tools || [])] }
+    : { name: '通用助手', bot_id: bots.value[0]?.id || null, tools: [], privacy_level: '', allow_write: true, auto_approve: false, system_prompt: '' }
+  profileVisible.value = true
+}
+
+async function saveProfile() {
+  if (!profileForm.value.name?.trim()) {
+    ElMessage.warning('请填写名称')
+    return
+  }
+  try {
+    if (profileForm.value.id) await agentApi.updateProfile(profileForm.value.id, profileForm.value)
+    else await agentApi.createProfile(profileForm.value)
+    ElMessage.success('已保存')
+    profileVisible.value = false
+    await load()
+  } catch (e) {
+    ElMessage.error(errMsg(e))
+  }
+}
+
+async function removeProfile(row) {
+  await ElMessageBox.confirm(`删除 Agent 配置「${row.name}」？`, '确认删除', { type: 'warning' })
+  await agentApi.deleteProfile(row.id)
+  ElMessage.success('已删除')
+  await load()
+}
+
+async function runPreview() {
+  if (!previewText.value.trim()) {
+    ElMessage.warning('请先输入一段文字')
+    return
+  }
+  previewing.value = true
+  try {
+    const { data } = await agentApi.privacyPreview({ text: previewText.value, level: previewLevel.value })
+    previewResult.value = data
+  } catch (e) {
+    ElMessage.error(errMsg(e))
+  } finally {
+    previewing.value = false
+  }
+}
 
 async function saveSearchConfig() {
   savingSearch.value = true
@@ -216,7 +465,11 @@ function onProviderChange(key) {
 function openEdit(bot) {
   form.value = bot
     ? { ...bot, api_key: '' }
-    : { name: '', provider: 'deepseek', base_url: '', api_key: '', model: '' }
+    : {
+        name: '', provider: 'deepseek', base_url: '', api_key: '', model: '',
+        temperature: 0.7, max_tokens: 1600, timeout: 120, extra_headers: '{}',
+        enabled: true, is_default: false, fallback_bot_id: null,
+      }
   if (!bot) onProviderChange('deepseek')
   else form.value.base_url = bot.base_url
   testResult.value = null
@@ -414,5 +667,39 @@ async function clearHistory() {
   font-size: 13px;
   white-space: pre-wrap;
   word-break: break-word;
+}
+.hint.inline {
+  margin: 0 0 0 8px;
+  font-size: 12px;
+}
+.agent-card {
+  margin-top: 16px;
+}
+.agent-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.preview-box {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.preview-ops {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.preview-result {
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: var(--el-fill-color-lighter);
+  font-size: 13px;
+  word-break: break-word;
+}
+.preview-line + .preview-line {
+  margin-top: 6px;
 }
 </style>

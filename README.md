@@ -42,7 +42,11 @@
   - 图例点选控制显示/隐藏，纵坐标随数据自动适配
 - **总览**：得分率成长曲线（按学科颜色 + 场次总分）、最近考试、各科最新成绩
 - **导出数据**：单元测验 / 期中期末 / 学期排名板块均可一键导出当前图表数据为 Excel
-- **智能助手（可选）**：内置 DeepSeek / 通义千问 / Kimi / 智谱等厂商预设（也支持 OpenAI 兼容自定义接口），填入自己的 API Key 即可使用；任何页面可呼出悬浮侧栏对话，自动聚焦当前浏览的成绩，支持趋势分析、弱科诊断、学习建议；AI 评语一键写入成绩/考试详情；会话历史保存在本地，可删除/清空
+- **智能助手（可选）**：内置 DeepSeek / 通义千问 / Kimi / 智谱 / OpenAI / OpenRouter / SiliconFlow / Groq / Mistral 等厂商预设（也支持 OpenAI 兼容自定义接口），每个机器人可单独配置模型、温度、最大输出、超时、额外请求头与故障回退；任何页面可呼出悬浮侧栏对话，自动聚焦当前浏览的成绩，支持趋势分析、弱科诊断、学习建议；AI 评语一键写入成绩/考试详情；会话历史保存在本地，可删除/清空
+- **Agent 工作台**：用对话完成「导入数据 / 了解近况 / 分析成绩 / 整理错题」。Agent 会自主调用 18 个本地工具（孩子、学科、场次、成绩、错题的读写与分析），界面实时展示每一步工具调用；所有写操作先生成预览，确认后才落库，批量导入支持 dry-run
+- **多 Provider + 密钥加密**：API Key 只以 AES-256-GCM 密文入库（主密钥来自 `APP_SECRET` 或本地自动生成文件），接口只返回打码值；出站请求强制校验 URL，拒绝本机/内网/保留地址
+- **儿童隐私脱敏**：发送给第三方模型前，本地把姓名、学校、班级、学号、电话、邮箱、地址等替换成可逆占位符（magpie 架构：稳定、可逆、流式分片安全），模型回复时自动还原；支持 `off / standard / strict` 三级，可选接入 AstrLink Guard 本地模型。详见 [docs/agent-privacy.md](docs/agent-privacy.md)
+- **命令行 / Agent 接口**：`cli/` 提供 `oa` 命令（CLI-Anything 风格），所有命令支持 `--json`，可被外部 AI Agent 直接调用；配套 Skill 见 `cli/overachievers_cli/skills/overachievers-cli/SKILL.md`
 - **数据备份**：一键导出全部数据为 JSON 备份文件；导入备份文件即可整库恢复
 - **访问密码（可选）**：设置 `APP_PASSWORD` 后需登录，适合暴露公网时开启
 
@@ -51,7 +55,8 @@
 - 所有数据存在 **一个 SQLite 文件** 里（`data/overachievers.db`），成绩、错题的图片在 `data/uploads/`
 - 备份 = 复制 `data` 目录，或直接用系统内「设置 → 数据备份」导出 JSON
 - 数据完全保存在你自己的机器上，不经过任何第三方
-- **智能助手的隐私说明**：不配置 AI 机器人时，该功能完全不工作，无任何外部请求；配置后，你选中发送给 AI 的成绩数据会通过官方接口提交给你所配置的大模型服务商处理，请知悉并自行评估；API Key 仅保存在你自己的数据库里
+- **智能助手的隐私说明**：不配置 AI 机器人时，该功能完全不工作，无任何外部请求；配置后，发送给 AI 的文本会先经过本地脱敏（孩子姓名、学校、电话等替换为占位符），再提交给你所配置的大模型服务商，模型返回的占位符在本地还原；API Key 以密文保存在你自己的数据库里
+- **主密钥**：加密 Key 的主密钥默认生成在 `data/.app_secret`，迁移或备份数据时请一并保留；丢失后已存的 API Key 需要重新填写
 
 ## Docker 部署
 
@@ -164,6 +169,25 @@ npm run build   # 产物复制到 backend/static 后由后端统一提供服务
 ```
 
 浏览器打开 `http://127.0.0.1:8100` 即可使用。
+
+### 命令行（可选）
+
+```bash
+pip install -e ./cli          # 安装 oa 命令
+export OA_BASE_URL=http://127.0.0.1:8100
+oa health
+oa --json children list
+oa status child --name 小明
+oa agent chat --bot-id 1 "分析一下最近的数学成绩" --show-steps
+```
+
+完整命令与 JSON 事件格式见 [`cli/overachievers_cli/skills/overachievers-cli/SKILL.md`](cli/overachievers_cli/skills/overachievers-cli/SKILL.md)。
+
+### 测试
+
+```bash
+cd backend && python -m unittest discover -s tests -v
+```
 
 ## 技术栈
 
