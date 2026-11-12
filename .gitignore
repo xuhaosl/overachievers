@@ -27,3 +27,9 @@ backend/start_service.ps1
 .idea/
 .vscode/
 .trae/
+
+# 工具临时目录 / 本地测试产物（不入库）
+.tmp/
+**/.tmp/
+.mimosa/
+**/.mimosa/

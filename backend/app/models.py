@@ -200,17 +200,30 @@ class ScoreImage(Base):
 
 
 class AiBot(Base):
-    """AI 机器人配置：provider 预设 + 用户填写的 API key，支持多个。"""
+    """AI 机器人配置：provider 预设 + 用户填写的 API key，支持多个。
+
+    API Key 只保存 `api_key_enc` 密文；`api_key` 仅用于兼容旧库，迁移后清空。
+    同一厂商可以建多个机器人（不同模型/温度/超时），并可指定故障回退机器人。
+    """
 
     __tablename__ = "ai_bots"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(50))  # 机器人名称
-    provider: Mapped[str] = mapped_column(String(50), default="deepseek")  # deepseek/qwen/kimi/zhipu/custom
+    provider: Mapped[str] = mapped_column(String(50), default="deepseek")  # provider 注册表 key
     base_url: Mapped[str] = mapped_column(String(200), default="")  # OpenAI 兼容接口地址
-    api_key: Mapped[str] = mapped_column(String(200), default="")
+    api_key: Mapped[str] = mapped_column(String(200), default="")  # 旧列：迁移后为空
+    api_key_enc: Mapped[str] = mapped_column(Text, default="")  # enc:v1:... 密文
     model: Mapped[str] = mapped_column(String(100), default="")  # 模型名，可改
+    temperature: Mapped[float] = mapped_column(Float, default=0.7)
+    max_tokens: Mapped[int] = mapped_column(Integer, default=1600)
+    timeout: Mapped[int] = mapped_column(Integer, default=120)  # 秒
+    extra_headers: Mapped[str] = mapped_column(Text, default="{}")  # JSON，自定义请求头
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False)
+    fallback_bot_id: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 故障回退
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
 class AiConversation(Base):
@@ -221,20 +234,92 @@ class AiConversation(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     bot_id: Mapped[int] = mapped_column(ForeignKey("ai_bots.id"))
     title: Mapped[str] = mapped_column(String(100), default="")  # AI 总结的主要内容，空=待生成
+    mode: Mapped[str] = mapped_column(String(20), default="chat")  # chat / agent
+    profile_id: Mapped[int | None] = mapped_column(Integer, nullable=True)  # AgentProfile.id
+    privacy_level: Mapped[str] = mapped_column(String(20), default="")  # 空=使用全局默认
+    meta: Mapped[str] = mapped_column(Text, default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())  # 有新消息时刷新
 
 
 class AiMessage(Base):
-    """AI 会话历史：按会话保存 user/assistant 消息。"""
+    """AI 会话历史：按会话保存 user/assistant/tool 消息。"""
 
     __tablename__ = "ai_messages"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     bot_id: Mapped[int] = mapped_column(ForeignKey("ai_bots.id"))
     conversation_id: Mapped[int] = mapped_column(ForeignKey("ai_conversations.id"), nullable=True)
-    role: Mapped[str] = mapped_column(String(20))  # user / assistant
+    role: Mapped[str] = mapped_column(String(20))  # user / assistant / tool
     content: Mapped[str] = mapped_column(Text)
+    meta: Mapped[str] = mapped_column(Text, default="{}")  # 工具步骤、脱敏统计等 JSON
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+# ---------- Agent ----------
+class AgentProfile(Base):
+    """Agent 配置：绑定一个 Provider 机器人，声明可用工具、写入权限与隐私级别。"""
+
+    __tablename__ = "agent_profiles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(50), default="通用助手")
+    bot_id: Mapped[int | None] = mapped_column(ForeignKey("ai_bots.id"), nullable=True)
+    system_prompt: Mapped[str] = mapped_column(Text, default="")  # 追加在系统提示后
+    tools: Mapped[str] = mapped_column(Text, default="[]")  # 工具名 JSON 数组；空=全部
+    privacy_level: Mapped[str] = mapped_column(String(20), default="")  # 空=全局默认
+    allow_write: Mapped[bool] = mapped_column(Boolean, default=True)  # 允许新增数据
+    auto_approve: Mapped[bool] = mapped_column(Boolean, default=False)  # 写入免确认
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class AgentPendingAction(Base):
+    """Agent 的待确认写操作：模型先给出预览，用户确认后才落库。"""
+
+    __tablename__ = "agent_pending_actions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    token: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    conversation_id: Mapped[int] = mapped_column(ForeignKey("ai_conversations.id"))
+    bot_id: Mapped[int] = mapped_column(ForeignKey("ai_bots.id"))
+    tool: Mapped[str] = mapped_column(String(50))
+    args: Mapped[str] = mapped_column(Text, default="{}")
+    summary: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(20), default="pending")  # pending/confirmed/cancelled/expired
+    result: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+
+
+class AgentRun(Base):
+    """一次 Agent 对话运行的步骤轨迹，供前端时间线与审计使用。"""
+
+    __tablename__ = "agent_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    conversation_id: Mapped[int] = mapped_column(ForeignKey("ai_conversations.id"))
+    bot_id: Mapped[int] = mapped_column(ForeignKey("ai_bots.id"))
+    profile_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="running")  # running/done/error
+    steps: Mapped[str] = mapped_column(Text, default="[]")
+    error: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class PrivacyAudit(Base):
+    """脱敏审计：只记录数量与类型，不记录原值。"""
+
+    __tablename__ = "privacy_audits"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    conversation_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    direction: Mapped[str] = mapped_column(String(10), default="out")  # out/in
+    level: Mapped[str] = mapped_column(String(20), default="standard")
+    counts: Mapped[str] = mapped_column(Text, default="{}")
+    placeholders: Mapped[int] = mapped_column(Integer, default=0)
+    chars: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
@@ -318,5 +403,6 @@ class MistakeSearchConfig(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     provider: Mapped[str] = mapped_column(String(30), default="tavily")  # tavily / serper / bing
-    api_key: Mapped[str] = mapped_column(String(200), default="")
+    api_key: Mapped[str] = mapped_column(String(200), default="")  # 旧列：迁移后为空
+    api_key_enc: Mapped[str] = mapped_column(Text, default="")  # enc:v1:... 密文
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())

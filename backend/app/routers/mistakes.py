@@ -417,9 +417,23 @@ def set_options(child_id: int = Query(...), db: Session = Depends(get_db)):
 
 # ---------- 原题检索配置（预留，必须先于 /{mistake_id} 注册） ----------
 def _mask_key(key: str) -> str:
-    if not key:
+    from ..crypto import mask_key
+
+    return mask_key(key)
+
+
+def _search_key(cfg: MistakeSearchConfig | None) -> str:
+    if not cfg:
         return ""
-    return key[:4] + "****" + key[-4:] if len(key) > 8 else "****"
+    from .. import crypto
+
+    if getattr(cfg, "api_key_enc", ""):
+        try:
+            return crypto.decrypt_secret(cfg.api_key_enc)
+        except crypto.SecretDecryptError:
+            return ""
+    legacy = cfg.api_key or ""
+    return crypto.maybe_decrypt(legacy) if crypto.is_encrypted(legacy) else legacy
 
 
 @router.get("/search-config")
@@ -427,18 +441,22 @@ def get_search_config(db: Session = Depends(get_db)):
     cfg = db.get(MistakeSearchConfig, 1)
     if not cfg:
         return {"provider": "tavily", "api_key_masked": "", "configured": False}
-    return {"provider": cfg.provider, "api_key_masked": _mask_key(cfg.api_key), "configured": bool(cfg.api_key)}
+    key = _search_key(cfg)
+    return {"provider": cfg.provider, "api_key_masked": _mask_key(key), "configured": bool(key)}
 
 
 @router.put("/search-config")
 def put_search_config(body: SearchConfigIn, db: Session = Depends(get_db)):
+    from .. import crypto
+
     cfg = db.get(MistakeSearchConfig, 1)
     if not cfg:
         cfg = MistakeSearchConfig(id=1)
         db.add(cfg)
     cfg.provider = body.provider
     if body.api_key.strip():
-        cfg.api_key = body.api_key.strip()
+        cfg.api_key_enc = crypto.encrypt_secret(body.api_key.strip())
+        cfg.api_key = ""
     db.commit()
     return {"ok": True}
 
@@ -665,35 +683,38 @@ def delete_mistake(mistake_id: int, db: Session = Depends(get_db)):
 
 # ---------- AI ----------
 def _get_bot(db: Session, bot_id: int | None) -> AiBot:
+    from sqlalchemy import or_
+
+    from ..providers import bot_api_key
+
     if bot_id:
         bot = db.get(AiBot, bot_id)
     else:
-        bot = db.scalars(select(AiBot).where(AiBot.api_key != "").order_by(AiBot.id)).first()
+        bot = db.scalars(
+            select(AiBot)
+            .where(or_(AiBot.api_key_enc != "", AiBot.api_key != ""))
+            .order_by(AiBot.id)
+        ).first()
     if not bot:
         raise HTTPException(400, "请先在「设置 → 智能助手」里配置一个机器人")
-    if not bot.api_key:
+    if not bot_api_key(bot):
         raise HTTPException(400, "该机器人未配置 API key")
     return bot
 
 
 def _chat_url(bot: AiBot) -> str:
-    from .ai import PROVIDERS
-    base = (bot.base_url or PROVIDERS.get(bot.provider, {}).get("base_url", "")).strip()
-    if not base.startswith("http"):
-        raise HTTPException(400, "机器人接口地址不合法")
-    return base.rstrip("/") + "/chat/completions"
+    from ..providers import chat_url, validate_provider_url
+
+    return chat_url(validate_provider_url(bot.provider, bot.base_url))
 
 
 async def _call_model(bot: AiBot, messages: list, max_tokens: int = 4000) -> str:
+    from ..providers import bot_api_key, bot_payload, headers_for
+
     url = _chat_url(bot)
-    headers = {"Authorization": f"Bearer {bot.api_key}", "Content-Type": "application/json"}
-    payload = {
-        "model": bot.model,
-        "messages": messages,
-        "temperature": 0.2,
-        "max_tokens": max_tokens,
-        "stream": False,
-    }
+    key = bot_api_key(bot)
+    headers = headers_for(bot, key)
+    payload = bot_payload(bot, messages, stream=False, temperature=0.2, max_tokens=max_tokens)
     # DeepSeek 等推理型模型会先输出大段 reasoning，长图识别时容易把 token 全耗在
     # 思考上、content 为空；识别/整理类任务直接关闭思考，稳定输出 JSON。
     if bot.provider == "deepseek" or "deepseek" in (bot.base_url or "").lower():
@@ -1246,6 +1267,6 @@ def search_original_question(question: str, config: MistakeSearchConfig | None) 
 
     本期未接入任何搜索服务：未配置时直接返回空列表，上层流程自动落到 AI 自组织。
     """
-    if not config or not config.api_key:
+    if not config or not _search_key(config):
         return []
     return []
