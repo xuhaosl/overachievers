@@ -51,6 +51,9 @@ def overview(child_id: int | None = None, db: Session = Depends(get_db)):
         unit_part = "、".join(f"第{u.sort_no}单元" for u in sorted(s.units, key=lambda u: (u.sort_no, u.id)))
         term_part = (s.term or "").split(" ")[-1] if s.term else ""
         title = f"{s.subject.name if s.subject else ''}{unit_part}"
+        # 期中/期末等整卷考试用考试类型作标题；单元测试用单元范围
+        if s.type and "单元" not in s.type:
+            title = f"{s.subject.name if s.subject else ''}{s.type}"
         meta = "".join([stage, f"{s.grade}年级" if s.grade else "", term_part])
         latest.append(
             SubjectLatest(
