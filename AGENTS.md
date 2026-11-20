@@ -76,6 +76,7 @@ oa --json children list
 | `DATA_DIR` | 数据目录（SQLite + 上传图片 + 主密钥） | 容器 `/app/data`，本地 `./data` |
 | `APP_SECRET` | API Key 加密主密钥（任意长字符串） | 空，自动生成 `DATA_DIR/.app_secret` |
 | `APP_SECRET_FILE` | 从文件读取主密钥 | 空 |
+| `CORS_ORIGINS` | 允许跨域的来源（逗号分隔，仅本地开发需要） | `http://localhost:5173,http://127.0.0.1:5173` |
 | `PRIVACY_LEVEL` | 默认脱敏级别 `off/standard/strict` | `standard` |
 | `PRIVACY_GUARD_MODEL` | AstrLink Guard 开关 `auto/off` | `auto` |
 | `ASTR_GUARD_DIR` | AstrLink Guard 模型目录 | `DATA_DIR/models/astrlink-guard` |

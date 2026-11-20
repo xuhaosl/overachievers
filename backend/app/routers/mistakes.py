@@ -35,7 +35,7 @@ from ..models import (
     Subject,
     Unit,
 )
-from ..uploads import ALLOWED_EXTS, UPLOAD_DIR
+from ..uploads import ALLOWED_EXTS, UPLOAD_DIR, read_upload
 
 router = APIRouter(prefix="/mistakes", tags=["mistakes"], dependencies=[AuthDep])
 
@@ -180,7 +180,7 @@ def _save_upload(upload: UploadFile) -> str:
         raise HTTPException(422, "仅支持 jpg/png/gif/webp 图片")
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     name = f"mistake_{uuid.uuid4().hex}{ext}"
-    (UPLOAD_DIR / name).write_bytes(upload.file.read())
+    (UPLOAD_DIR / name).write_bytes(read_upload(upload))
     return name
 
 
@@ -1146,7 +1146,7 @@ async def ai_recognize(
         if not score:
             raise HTTPException(404, "成绩不存在")
     if file:
-        image_bytes = await file.read()
+        image_bytes = await file.read(20 * 1024 * 1024 + 1)
         mime = file.content_type or "image/jpeg"
     if not image_bytes:
         raise HTTPException(400, "请提供图片")

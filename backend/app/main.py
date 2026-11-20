@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -432,10 +433,18 @@ _migrate()
 
 app = FastAPI(title="卷王之王", version=meta_router.app_version())
 
-# 开发模式下前端 vite 跨域用
+# 跨域只放开本地开发端口；生产环境同源访问不需要 CORS，
+# 放开 "*" 会让任意网站读取本机 API 数据（未设密码时尤其危险）。
+_DEV_ORIGINS = [
+    o.strip()
+    for o in os.environ.get(
+        "CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
+    ).split(",")
+    if o.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_DEV_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )

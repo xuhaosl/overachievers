@@ -100,7 +100,9 @@ def _coerce(model, row: dict) -> dict:
 
 @router.post("/import")
 async def import_data(file: UploadFile = File(...), db: Session = Depends(get_db)):
-    raw = await file.read()
+    raw = await file.read(50 * 1024 * 1024 + 1)
+    if len(raw) > 50 * 1024 * 1024:
+        raise HTTPException(413, "备份文件太大（上限 50MB）")
     try:
         data = json.loads(raw)
     except Exception:

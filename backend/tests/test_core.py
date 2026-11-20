@@ -302,5 +302,42 @@ class ConfirmationTest(unittest.TestCase):
             self.assertFalse(is_confirmation(text), text)
 
 
+class GuardrailTest(unittest.TestCase):
+    """上传体积与登录限流的兜底。"""
+
+    def test_read_upload_rejects_oversize(self):
+        import io
+        from types import SimpleNamespace
+
+        from fastapi import HTTPException
+
+        from app.uploads import read_upload
+
+        upload = SimpleNamespace(file=io.BytesIO(b"x" * (2 * 1024 * 1024)))
+        with self.assertRaises(HTTPException) as ctx:
+            read_upload(upload, limit=1024 * 1024)
+        self.assertEqual(ctx.exception.status_code, 413)
+
+    def test_read_upload_passes_small_file(self):
+        import io
+        from types import SimpleNamespace
+
+        from app.uploads import read_upload
+
+        upload = SimpleNamespace(file=io.BytesIO(b"abc"))
+        self.assertEqual(read_upload(upload), b"abc")
+
+    def test_login_throttle_blocks_after_repeated_failures(self):
+        from app.routers import auth as auth_router
+
+        ip = "10.0.0.9"
+        auth_router._fails.pop(ip, None)
+        self.assertEqual(auth_router.login_retry_after(ip), 0)
+        for _ in range(auth_router.FAIL_LIMIT):
+            auth_router._record_failure(ip)
+        self.assertGreater(auth_router.login_retry_after(ip), 0)
+        auth_router._fails.pop(ip, None)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -15,6 +15,22 @@ from .models import ScoreImage
 
 UPLOAD_DIR = DATA_DIR / "uploads"
 ALLOWED_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
+MAX_UPLOAD_BYTES = 15 * 1024 * 1024
+
+
+def read_upload(upload, limit: int = MAX_UPLOAD_BYTES) -> bytes:
+    """分块读取上传文件并限制大小，避免超大文件把内存打满。"""
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = upload.file.read(1024 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > limit:
+            raise HTTPException(413, f"图片不能超过 {limit // (1024 * 1024)}MB")
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 def save_score_image(db: Session, score_id: int, upload) -> ScoreImage:
@@ -23,7 +39,7 @@ def save_score_image(db: Session, score_id: int, upload) -> ScoreImage:
         raise HTTPException(422, "仅支持 jpg/png/gif/webp 图片")
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     name = f"{uuid.uuid4().hex}{ext}"
-    (UPLOAD_DIR / name).write_bytes(upload.file.read())
+    (UPLOAD_DIR / name).write_bytes(read_upload(upload))
     max_no = db.scalar(select(func.max(ScoreImage.sort_no)).where(ScoreImage.score_id == score_id)) or 0
     img = ScoreImage(score_id=score_id, filename=name, original_name=upload.filename or "", sort_no=max_no + 1)
     db.add(img)
