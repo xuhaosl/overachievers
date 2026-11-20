@@ -2,12 +2,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..auth import AuthDep
 from ..database import get_db
 from ..grading import stage_grade_at
 from ..models import Child, SchoolClass
 from ..schemas import ClassIn, ClassOut
 
-router = APIRouter(prefix="/classes", tags=["classes"])
+router = APIRouter(prefix="/classes", tags=["classes"], dependencies=[AuthDep])
 
 
 def enrich_class(c: SchoolClass, out: ClassOut, db: Session) -> ClassOut:
