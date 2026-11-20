@@ -286,5 +286,21 @@ class AgentToolTest(unittest.TestCase):
         self.assertEqual(self.db.query(self.models["Child"]).count(), 1)
 
 
+class ConfirmationTest(unittest.TestCase):
+    """确认语识别：必须是短语，长句里偶然出现“确认”不算。"""
+
+    def test_short_confirm_phrases(self):
+        from app.agent.runtime import is_confirmation
+
+        for text in ["确认", "确认执行", "好的，执行", "确定", "执行吧", "OK", " 确认 "]:
+            self.assertTrue(is_confirmation(text), text)
+
+    def test_question_with_confirm_word_is_not_confirmation(self):
+        from app.agent.runtime import is_confirmation
+
+        for text in ["", "我想确认一下这次数学考了多少分", "确认一下成绩", "帮我确认下错题集里有几道题"]:
+            self.assertFalse(is_confirmation(text), text)
+
+
 if __name__ == "__main__":
     unittest.main()

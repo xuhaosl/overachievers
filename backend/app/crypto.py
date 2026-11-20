@@ -224,12 +224,11 @@ def placeholder_for(kind: str, value: str) -> str:
 
 
 def secret_status() -> dict:
-    master, source = _master_key()
+    _, source = _master_key()
     return {
         "encrypted": True,
         "scheme": "aes-256-gcm" if _HAS_AESGCM else "hmac-sha256-stream",
         "key_source": source,
-        "key_fingerprint": hashlib.sha256(master).hexdigest()[:12],
     }
 
 

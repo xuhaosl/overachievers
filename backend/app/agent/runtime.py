@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 from typing import Any, AsyncIterator
 
@@ -29,11 +30,17 @@ HISTORY_LIMIT = 16
 SSE_DONE = "data: {\"type\": \"done\"}\n\n"
 
 # 用户在本轮明确表达确认意图，才允许模型调用 confirm_pending_action
-CONFIRM_RE = __import__("re").compile(
-    r"(确认|确定|可以了?|同意|执行吧?|就这样|好的?[，, ]?(执行|保存|写入|导入)|"
-    r"^(ok|yes|y|go|do it)$)",
-    __import__("re").I,
+CONFIRM_RE = re.compile(
+    r"(确认|确定|同意|可以了|就这样|好的|没问题|执行|ok|yes|y|go)(执行|保存|写入|导入|吧)?",
+    re.I,
 )
+# 确认语必须是短语：长句里偶然出现“确认”不算，避免与待办操作无关的提问误放行写操作
+CONFIRM_MAX_LEN = 12
+
+
+def is_confirmation(text: str) -> bool:
+    clean = re.sub(r"[\s，。！？、,.!?~～]+", "", text or "")
+    return 0 < len(clean) <= CONFIRM_MAX_LEN and bool(CONFIRM_RE.fullmatch(clean))
 
 
 class ProviderError(RuntimeError):
@@ -203,7 +210,7 @@ async def agent_event_stream(
             engine=engine,
         )
         # 只有用户本轮明确表达“确认/执行”时才允许模型调用确认工具，避免模型自问自答直接落库
-        ctx.user_confirmed = bool(CONFIRM_RE.search(question))
+        ctx.user_confirmed = is_confirmation(question)
 
         chain = _load_bot_with_fallback(db, bot)
         final_text = ""
