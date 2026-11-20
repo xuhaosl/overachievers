@@ -14,6 +14,7 @@ import ExamDetail from './views/ExamDetail.vue'
 import Backup from './views/Backup.vue'
 import About from './views/About.vue'
 import AiBots from './views/AiBots.vue'
+import Agent from './views/Agent.vue'
 import Login from './views/Login.vue'
 
 export default createRouter({
@@ -25,6 +26,7 @@ export default createRouter({
     { path: '/list', component: ScoreList, meta: { title: '成绩列表', icon: 'List' } },
     { path: '/charts', component: Charts, meta: { title: '成长曲线', icon: 'TrendCharts' } },
     { path: '/mistakes', component: Mistakes, meta: { title: '错题整理', icon: 'Collection' } },
+    { path: '/agent', component: Agent, meta: { title: 'Agent 工作台', icon: 'MagicStick' } },
     { path: '/children', component: Children, meta: { title: '孩子管理', icon: 'User', group: '设置' } },
     { path: '/subjects', component: Subjects, meta: { title: '学科管理', icon: 'Reading', group: '设置' } },
     { path: '/subject/:id', component: SubjectDetail, meta: { hidden: true } },

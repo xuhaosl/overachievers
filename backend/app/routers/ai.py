@@ -1,8 +1,9 @@
-"""AI 助手：机器人配置（provider 预设 + API key）、会话历史、流式对话。
+"""AI 助手：机器人配置（多 Provider + 加密 Key）、会话历史、流式对话。
 
 - 机器人走 OpenAI 兼容 chat/completions 协议，后端统一代理转发（SSE 流式）
+- 出站文本经过 magpie 风格脱敏；模型返回的占位符在流式转发时还原
 - 对话时按数据范围（孩子/场次/学科/时间段）从库里组装成绩上下文随消息发给模型
-- API key 只存本地库，接口返回时打码
+- API key 只以密文存库，接口返回时打码
 """
 from __future__ import annotations
 
@@ -12,50 +13,24 @@ import re
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from .. import crypto, providers
 from ..auth import AuthDep
 from ..database import get_db
-from ..models import AiBot, AiConversation, AiMessage, Child, Exam, Mistake, Score, Subject
+from ..models import AgentProfile, AiBot, AiConversation, AiMessage, Child, Exam, Mistake, PrivacyAudit, Score, Subject
+from ..privacy import StreamRestorer, default_level, engine_for_db
+from ..security import validate_outbound_url
 
 router = APIRouter(prefix="/ai", tags=["ai"], dependencies=[AuthDep])
 
-# 主流厂商预设：OpenAI 兼容接口地址 + 默认模型列表（custom 由用户自填）
-# 依据 2026-10 各厂商官方文档核对：DeepSeek api-docs.deepseek.com、
-# 通义百炼 help.aliyun.com/zh/model-studio/base-url、
-# Kimi platform.kimi.com/docs/api/overview、智谱 docs.bigmodel.cn/cn/api/introduction
-PROVIDERS = {
-    "deepseek": {
-        "label": "DeepSeek",
-        "base_url": "https://api.deepseek.com",
-        "models": ["deepseek-flash", "deepseek-v4-pro"],
-    },
-    "qwen": {
-        "label": "通义千问",
-        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "models": ["qwen3.8-max", "qwen3.8-flash", "qwen-plus"],
-    },
-    "kimi": {
-        "label": "Kimi（月之暗面）",
-        "base_url": "https://api.moonshot.cn/v1",
-        "models": ["kimi-k3", "kimi-k2.6"],
-    },
-    "zhipu": {
-        "label": "智谱 GLM",
-        "base_url": "https://open.bigmodel.cn/api/paas/v4",
-        "models": ["glm-5.3", "glm-5-turbo"],
-    },
-    "custom": {
-        "label": "OpenAI 兼容自定义",
-        "base_url": "",
-        "models": [],
-    },
-}
-
-# 发给模型的历史上下文轮数上限（控制 token 消耗）
+# 兼容旧引用
+PROVIDERS = providers.PROVIDERS
 HISTORY_LIMIT = 20
+SSE_ERROR = "data: {\"ai_error\": %s}\n\n"
+SSE_CHUNK = "data: {\"choices\": [{\"index\": 0, \"delta\": {\"content\": %s}, \"finish_reason\": null}]}\n\n"
 
 
 # ---------- 请求模型 ----------
@@ -65,6 +40,13 @@ class BotIn(BaseModel):
     base_url: str = ""
     api_key: str = ""
     model: str = ""
+    temperature: float = 0.7
+    max_tokens: int = 1600
+    timeout: int = 120
+    extra_headers: str = "{}"
+    enabled: bool = True
+    is_default: bool = False
+    fallback_bot_id: int | None = None
 
 
 class ChatIn(BaseModel):
@@ -72,34 +54,50 @@ class ChatIn(BaseModel):
     question: str
     conversation_id: int | None = None  # 为空则新建会话
     # 数据范围：孩子必填；场次/学科/时间段可选；focus 指明评语写入目标
-    scope: dict = {}
+    scope: dict = Field(default_factory=dict)
+    privacy_level: str = ""
 
 
 def mask_key(key: str) -> str:
-    if not key:
-        return ""
-    if len(key) <= 8:
-        return "****"
-    return key[:4] + "****" + key[-4:]
+    return crypto.mask_key(key)
 
 
 def bot_out(b: AiBot) -> dict:
-    return {
-        "id": b.id,
-        "name": b.name,
-        "provider": b.provider,
-        "provider_label": PROVIDERS.get(b.provider, {}).get("label", b.provider),
-        "base_url": b.base_url,
-        "api_key_masked": mask_key(b.api_key),
-        "has_key": bool(b.api_key),
-        "model": b.model,
-    }
+    return providers.bot_out_dict(b)
+
+
+def _bot_chain(db: Session, bot: AiBot) -> list[AiBot]:
+    chain = [bot]
+    seen = {bot.id}
+    nxt = getattr(bot, "fallback_bot_id", None)
+    while nxt and nxt not in seen and len(chain) < 3:
+        fallback = db.get(AiBot, int(nxt))
+        if not fallback or not getattr(fallback, "enabled", True):
+            break
+        chain.append(fallback)
+        seen.add(fallback.id)
+        nxt = getattr(fallback, "fallback_bot_id", None)
+    return chain
 
 
 # ---------- provider 预设 ----------
 @router.get("/providers")
-def providers():
-    return [{"key": k, **v} for k, v in PROVIDERS.items()]
+def providers_api():
+    return providers.provider_list()
+
+
+@router.get("/status")
+def ai_status(db: Session = Depends(get_db)):
+    from ..privacy import privacy_status
+
+    return {
+        "providers": len(providers.PROVIDERS),
+        "bots": db.scalar(select(func.count(AiBot.id))) or 0,
+        "enabled_bots": db.scalar(select(func.count(AiBot.id)).where(AiBot.enabled.is_(True))) or 0,
+        "default_bot_id": db.scalar(select(AiBot.id).where(AiBot.is_default.is_(True)).limit(1)),
+        "secret": crypto.secret_status(),
+        "privacy": privacy_status(),
+    }
 
 
 # ---------- 机器人 CRUD ----------
@@ -110,11 +108,17 @@ def list_bots(db: Session = Depends(get_db)):
 
 @router.post("/bots")
 def create_bot(body: BotIn, db: Session = Depends(get_db)):
-    _validate_bot(body)
-    b = AiBot(**body.model_dump())
-    db.add(b)
+    _validate_bot(body, db)
+    data = body.model_dump()
+    api_key = (data.pop("api_key") or "").strip()
+    bot = AiBot(**data)
+    providers.store_api_key(bot, api_key)
+    if body.is_default:
+        db.query(AiBot).update({AiBot.is_default: False}, synchronize_session=False)
+    db.add(bot)
     db.commit()
-    return bot_out(b)
+    db.refresh(bot)
+    return bot_out(bot)
 
 
 class BotTestIn(BaseModel):
@@ -130,17 +134,16 @@ async def test_bot(body: BotTestIn, db: Session = Depends(get_db)):
     """连接测试：发一个极小的对话请求验证配置是否可用。"""
     api_key = body.api_key.strip()
     if not api_key and body.bot_id:
-        b = db.get(AiBot, body.bot_id)
-        api_key = b.api_key if b else ""
+        stored = db.get(AiBot, body.bot_id)
+        api_key = providers.bot_api_key(stored) if stored else ""
     if not api_key:
         raise HTTPException(400, "请先填写 API Key")
     model = body.model.strip()
     if not model:
         raise HTTPException(400, "请先填写模型名")
-    base_url = body.base_url.strip() or PROVIDERS.get(body.provider, {}).get("base_url", "")
-    if not base_url.startswith("http"):
-        raise HTTPException(400, "接口地址不合法")
-    url = base_url.rstrip("/") + "/chat/completions"
+    base_url = providers.resolve_base_url(body.provider, body.base_url)
+    validate_outbound_url(base_url, field="接口地址")
+    url = providers.chat_url(base_url)
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": "hi"}],
@@ -151,8 +154,8 @@ async def test_bot(body: BotTestIn, db: Session = Depends(get_db)):
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=10.0)) as client:
             resp = await client.post(url, headers=headers, json=payload)
-    except httpx.HTTPError as e:
-        return {"ok": False, "message": f"连接失败：{e.__class__.__name__}（网络不通或地址错误）"}
+    except httpx.HTTPError as exc:
+        return {"ok": False, "message": f"连接失败：{exc.__class__.__name__}（网络不通或地址错误）"}
     if resp.status_code == 200:
         return {"ok": True, "message": "连接成功，配置可用"}
     detail = resp.text[:300]
@@ -160,50 +163,79 @@ async def test_bot(body: BotTestIn, db: Session = Depends(get_db)):
         detail = resp.json().get("error", {}).get("message") or detail
     except ValueError:
         pass
-    hint = {401: "API Key 无效", 404: "接口地址或模型名错误", 429: "限流/欠费"}.get(resp.status_code)
+    hint = {401: "API Key 无效", 403: "无权访问该模型", 404: "接口地址或模型名错误", 429: "限流/欠费"}.get(resp.status_code)
     return {"ok": False, "message": f"失败（{resp.status_code}）：{hint or detail}"}
 
 
 @router.patch("/bots/{bot_id}")
 def update_bot(bot_id: int, body: BotIn, db: Session = Depends(get_db)):
-    b = db.get(AiBot, bot_id)
-    if not b:
+    bot = db.get(AiBot, bot_id)
+    if not bot:
         raise HTTPException(404, "机器人不存在")
-    _validate_bot(body)
+    _validate_bot(body, db, bot_id=bot_id)
     data = body.model_dump()
-    # key 留空 = 保留原 key（编辑时不重复输入）
-    if not data["api_key"]:
-        del data["api_key"]
-    for k, v in data.items():
-        setattr(b, k, v)
+    api_key = (data.pop("api_key") or "").strip()
+    if api_key:
+        providers.store_api_key(bot, api_key)
+    for key, value in data.items():
+        setattr(bot, key, value)
+    if body.is_default:
+        db.query(AiBot).filter(AiBot.id != bot_id).update(
+            {AiBot.is_default: False}, synchronize_session=False
+        )
     db.commit()
-    return bot_out(b)
+    db.refresh(bot)
+    return bot_out(bot)
 
 
 @router.delete("/bots/{bot_id}")
 def delete_bot(bot_id: int, confirm: bool = Query(False), db: Session = Depends(get_db)):
-    b = db.get(AiBot, bot_id)
-    if not b:
+    bot = db.get(AiBot, bot_id)
+    if not bot:
         raise HTTPException(404, "机器人不存在")
-    n = db.scalar(select(func.count()).where(AiMessage.bot_id == bot_id)) or 0
+    n = db.scalar(select(func.count(AiMessage.id)).where(AiMessage.bot_id == bot_id)) or 0
     if n and not confirm:
         raise HTTPException(409, f"该机器人有 {n} 条会话记录，删除将一并清除")
     db.query(AiMessage).filter(AiMessage.bot_id == bot_id).delete()
-    db.delete(b)
+    db.query(AiConversation).filter(AiConversation.bot_id == bot_id).delete()
+    db.query(AiBot).filter(AiBot.fallback_bot_id == bot_id).update(
+        {AiBot.fallback_bot_id: None}, synchronize_session=False
+    )
+    db.query(AgentProfile).filter(AgentProfile.bot_id == bot_id).update(
+        {AgentProfile.bot_id: None}, synchronize_session=False
+    )
+    db.delete(bot)
     db.commit()
     return {"ok": True}
 
 
-def _validate_bot(body: BotIn):
+def _validate_bot(body: BotIn, db: Session, bot_id: int | None = None):
     if not body.name.strip():
         raise HTTPException(400, "机器人名称不能为空")
-    if body.provider not in PROVIDERS:
+    if body.provider not in providers.PROVIDERS:
         raise HTTPException(400, "不支持的 provider")
-    base_url = body.base_url.strip() or PROVIDERS[body.provider]["base_url"]
-    if not base_url.startswith("http"):
-        raise HTTPException(400, "接口地址不合法")
     if not body.model.strip():
         raise HTTPException(400, "模型名不能为空")
+    if not 0 <= body.temperature <= 2:
+        raise HTTPException(400, "temperature 需在 0~2 之间")
+    if not 1 <= body.max_tokens <= 200000:
+        raise HTTPException(400, "max_tokens 需在 1~200000 之间")
+    if not 5 <= body.timeout <= 600:
+        raise HTTPException(400, "timeout 需在 5~600 秒之间")
+    base_url = providers.resolve_base_url(body.provider, body.base_url)
+    validate_outbound_url(base_url, field="接口地址")
+    if body.fallback_bot_id:
+        if bot_id and body.fallback_bot_id == bot_id:
+            raise HTTPException(400, "故障回退不能指向自己")
+        if not db.get(AiBot, body.fallback_bot_id):
+            raise HTTPException(404, "回退机器人不存在")
+    if body.extra_headers.strip():
+        try:
+            parsed = json.loads(body.extra_headers)
+        except ValueError:
+            raise HTTPException(400, "额外请求头必须是合法 JSON 对象")
+        if not isinstance(parsed, dict):
+            raise HTTPException(400, "额外请求头必须是 JSON 对象")
 
 
 # ---------- 会话（conversation）管理 ----------
@@ -217,6 +249,8 @@ def _conv_out(c: AiConversation, msg_count: int = 0) -> dict:
         "created_at": c.created_at,
         "updated_at": c.updated_at,
         "msg_count": msg_count,
+        "mode": getattr(c, "mode", "chat"),
+        "privacy_level": getattr(c, "privacy_level", ""),
     }
 
 
@@ -224,7 +258,9 @@ def _conv_out(c: AiConversation, msg_count: int = 0) -> dict:
 def list_conversations(bot_id: int, db: Session = Depends(get_db)):
     """会话列表（按最近活跃倒序），过滤空会话。"""
     convs = db.scalars(
-        select(AiConversation).where(AiConversation.bot_id == bot_id).order_by(AiConversation.updated_at.desc())
+        select(AiConversation)
+        .where(AiConversation.bot_id == bot_id, AiConversation.mode == "chat")
+        .order_by(AiConversation.updated_at.desc())
     ).all()
     counts = dict(db.execute(
         select(AiMessage.conversation_id, func.count(AiMessage.id))
@@ -237,7 +273,7 @@ def list_conversations(bot_id: int, db: Session = Depends(get_db)):
 def create_conversation(bot_id: int, db: Session = Depends(get_db)):
     if not db.get(AiBot, bot_id):
         raise HTTPException(404, "机器人不存在")
-    c = AiConversation(bot_id=bot_id)
+    c = AiConversation(bot_id=bot_id, mode="chat")
     db.add(c)
     db.commit()
     return _conv_out(c)
@@ -475,86 +511,12 @@ SYSTEM_PROMPT = (
     "当用户要求为某条成绩/某场考试写评语时，用一段 50 字以内、鼓励为主且指出改进方向的评语，"
     "并用 <comment></comment> 标签把评语正文包裹起来，评语正文里不要有换行。"
     "若数据中出现「本范围关联错题」，评语必须结合其中的具体错因/知识点（指出薄弱点），不要只写空泛鼓励。"
+    "文本中的 {{KIND_xxxxxxxx}} 是本地脱敏占位符，代表真实姓名/学校等；请当作普通文本使用，不要猜测或改写。"
 )
-
-SSE_ERROR = "data: {\"ai_error\": \"%s\"}\n\n"
-
-
-# ---------- 流式对话 ----------
-@router.post("/chat")
-async def chat(body: ChatIn, db: Session = Depends(get_db)):
-    bot = db.get(AiBot, body.bot_id)
-    if not bot:
-        raise HTTPException(404, "机器人不存在")
-    if not bot.api_key:
-        raise HTTPException(400, "该机器人未配置 API key")
-    question = body.question.strip()
-    if not question:
-        raise HTTPException(400, "问题不能为空")
-
-    # 会话：无 id 则新建；有 id 则校验归属该机器人
-    conv = None
-    if body.conversation_id:
-        conv = db.get(AiConversation, body.conversation_id)
-        if not conv or conv.bot_id != bot.id:
-            raise HTTPException(404, "会话不存在")
-    else:
-        conv = AiConversation(bot_id=bot.id)
-        db.add(conv)
-        db.commit()
-        db.refresh(conv)
-    conv_id = conv.id
-
-    # 组装消息：系统提示 + 本会话最近历史 + 数据上下文 + 本轮问题
-    history = db.scalars(
-        select(AiMessage).where(AiMessage.conversation_id == conv_id).order_by(AiMessage.id.desc()).limit(HISTORY_LIMIT)
-    ).all()
-    msgs = [{"role": "system", "content": SYSTEM_PROMPT}]
-    for m in reversed(history):
-        msgs.append({"role": m.role, "content": m.content})
-    ctx = build_context(db, body.scope)
-    msgs.append({"role": "user", "content": f"{ctx}\n\n我的问题：{question}"})
-
-    base_url = (bot.base_url or PROVIDERS.get(bot.provider, {}).get("base_url", "")).rstrip("/")
-    url = f"{base_url}/chat/completions"
-    payload = {
-        "model": bot.model,
-        "messages": msgs,
-        "stream": True,
-    }
-    headers = {"Authorization": f"Bearer {bot.api_key}", "Content-Type": "application/json"}
-
-    bot_id, user_question = bot.id, question
-
-    async def gen():
-        reply_parts: list[str] = []
-        try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=15.0)) as client:
-                async with client.stream("POST", url, headers=headers, json=payload) as resp:
-                    if resp.status_code != 200:
-                        detail = (await resp.aread()).decode("utf-8", "ignore")[:300]
-                        try:
-                            detail = json.loads(detail).get("error", {}).get("message") or detail
-                        except ValueError:
-                            pass
-                        yield SSE_ERROR % json.dumps(detail, ensure_ascii=False)
-                        return
-                    async for chunk in resp.aiter_bytes():
-                        reply_parts.append(chunk.decode("utf-8", "ignore"))
-                        yield chunk
-        except httpx.HTTPError as e:
-            yield SSE_ERROR % json.dumps(f"请求模型服务失败：{e.__class__.__name__}: {e}", ensure_ascii=False)
-            return
-        # 流结束：从累积的原始 SSE 文本解析出完整回复并存历史
-        reply = _extract_reply("".join(reply_parts))
-        if reply:
-            _save_history(bot_id, conv_id, user_question, reply)
-
-    return StreamingResponse(gen(), media_type="text/event-stream")
 
 
 def _extract_reply(raw: str) -> str:
-    """从转发的 SSE 原始文本中拼接出 assistant 完整回复。"""
+    """从转发的 SSE 原始文本中拼接出 assistant 完整回复（兼容旧测试）。"""
     out = []
     for line in raw.splitlines():
         line = line.strip()
@@ -573,49 +535,166 @@ def _extract_reply(raw: str) -> str:
     return "".join(out)
 
 
-def _save_history(bot_id: int, conv_id: int, question: str, reply: str):
-    """保存本轮消息；刷新会话活跃时间；空标题会话用模型生成一句话标题。"""
+def _save_history(bot_id: int, conv_id: int, question: str, reply: str, privacy: dict | None = None):
+    """保存本轮消息；刷新会话活跃时间；空标题会话用问题前缀命名。"""
     from datetime import datetime as _dt
 
     from ..database import SessionLocal
 
     with SessionLocal() as ses:
-        ses.add(AiMessage(bot_id=bot_id, conversation_id=conv_id, role="user", content=question))
-        ses.add(AiMessage(bot_id=bot_id, conversation_id=conv_id, role="assistant", content=reply))
+        ses.add(AiMessage(bot_id=bot_id, conversation_id=conv_id, role="user", content=question,
+                          meta=json.dumps({"privacy": privacy or {}}, ensure_ascii=False)))
+        ses.add(AiMessage(bot_id=bot_id, conversation_id=conv_id, role="assistant", content=reply,
+                          meta=json.dumps({"privacy": privacy or {}}, ensure_ascii=False)))
         conv = ses.get(AiConversation, conv_id)
         if conv:
             conv.updated_at = _dt.now()
             if not conv.title:
-                conv.title = _gen_title(bot_id, question)[:60]
+                conv.title = re.sub(r"\s+", " ", question).strip()[:40] or "会话"
         ses.commit()
 
 
-def _gen_title(bot_id: int, question: str) -> str:
-    """让模型把本轮问答总结成一句话标题；失败时降级为问题前缀。"""
-    from ..database import SessionLocal
+# ---------- 流式对话 ----------
+@router.post("/chat")
+async def chat(body: ChatIn, db: Session = Depends(get_db)):
+    bot = db.get(AiBot, body.bot_id)
+    if not bot:
+        raise HTTPException(404, "机器人不存在")
+    if not getattr(bot, "enabled", True):
+        raise HTTPException(400, "该机器人已停用")
+    if not providers.bot_api_key(bot):
+        raise HTTPException(400, "该机器人未配置 API key")
+    question = body.question.strip()
+    if not question:
+        raise HTTPException(400, "问题不能为空")
+    level = (body.privacy_level or "").strip().lower()
+    if level and level not in ("off", "standard", "strict"):
+        raise HTTPException(400, "privacy_level 只能是 off/standard/strict")
+    level = level or default_level()
 
-    try:
-        with SessionLocal() as ses:
-            bot = ses.get(AiBot, bot_id)
-            if not bot or not bot.api_key:
-                return question
-            base_url = (bot.base_url or PROVIDERS.get(bot.provider, {}).get("base_url", "")).rstrip("/")
-            resp = httpx.post(
-                f"{base_url}/chat/completions",
-                headers={"Authorization": f"Bearer {bot.api_key}", "Content-Type": "application/json"},
-                json={
-                    "model": bot.model,
-                    "messages": [
-                        {"role": "system", "content": "用不超过20个字概括用户的问题主题，只输出这句话，不要标点结尾。"},
-                        {"role": "user", "content": question[:500]},
-                    ],
-                    "max_tokens": 40,
-                    "temperature": 0.3,
-                },
-                timeout=30,
-            )
-            obj = resp.json()
-            title = (obj["choices"][0]["message"]["content"] or "").strip().strip('"「」')
-            return title or question
-    except Exception:
-        return question
+    # 会话：无 id 则新建；有 id 则校验归属该机器人
+    conv = None
+    if body.conversation_id:
+        conv = db.get(AiConversation, body.conversation_id)
+        if not conv or conv.bot_id != bot.id:
+            raise HTTPException(404, "会话不存在")
+    else:
+        conv = AiConversation(bot_id=bot.id, mode="chat", privacy_level=level)
+        db.add(conv)
+        db.commit()
+        db.refresh(conv)
+    conv_id = conv.id
+
+    # 出站脱敏：系统提示、历史、数据上下文、本轮问题全部经过同一引擎
+    engine = engine_for_db(db, level=level)
+    restorer = StreamRestorer(engine)
+    history = db.scalars(
+        select(AiMessage).where(AiMessage.conversation_id == conv_id).order_by(AiMessage.id.desc()).limit(HISTORY_LIMIT)
+    ).all()
+    msgs = [{"role": "system", "content": engine.redact(SYSTEM_PROMPT)}]
+    for m in reversed(history):
+        if m.role in ("user", "assistant"):
+            msgs.append({"role": m.role, "content": engine.redact(m.content or "")})
+    ctx = engine.redact(build_context(db, body.scope))
+    safe_question = engine.redact(question)
+    msgs.append({"role": "user", "content": f"{ctx}\n\n我的问题：{safe_question}"})
+
+    chain = _bot_chain(db, bot)
+    bot_id, user_question = bot.id, question
+
+    async def gen():
+        raw_parts: list[str] = []
+        sent_done = False
+        last_error = ""
+        for candidate in chain:
+            payload = providers.bot_payload(candidate, msgs, stream=True)
+            try:
+                async with httpx.AsyncClient(
+                    timeout=httpx.Timeout(float(getattr(candidate, "timeout", 120) or 120), connect=15.0)
+                ) as client:
+                    url = providers.chat_url(providers.validate_provider_url(candidate.provider, candidate.base_url))
+                    async with client.stream(
+                        "POST", url, headers=providers.headers_for(candidate), json=payload,
+                    ) as resp:
+                        if resp.status_code != 200:
+                            detail = (await resp.aread()).decode("utf-8", "ignore")[:300]
+                            try:
+                                detail = json.loads(detail).get("error", {}).get("message") or detail
+                            except ValueError:
+                                pass
+                            last_error = detail
+                            if not raw_parts and candidate is not chain[-1]:
+                                continue
+                            yield SSE_ERROR % json.dumps(detail, ensure_ascii=False)
+                            return
+                        async for line in resp.aiter_lines():
+                            line = (line or "").strip()
+                            if not line or not line.startswith("data:"):
+                                continue
+                            data = line[5:].strip()
+                            if data == "[DONE]":
+                                tail = restorer.flush()
+                                if tail:
+                                    yield SSE_CHUNK % json.dumps(tail, ensure_ascii=False)
+                                yield "data: [DONE]\n\n"
+                                sent_done = True
+                                break
+                            try:
+                                obj = json.loads(data)
+                            except ValueError:
+                                continue
+                            if obj.get("error"):
+                                yield SSE_ERROR % json.dumps(
+                                    str(obj["error"].get("message") or obj["error"]), ensure_ascii=False
+                                )
+                                return
+                            try:
+                                delta = obj["choices"][0].get("delta", {})
+                            except (KeyError, IndexError):
+                                delta = {}
+                            content = delta.get("content")
+                            if content:
+                                raw_parts.append(content)
+                                safe = restorer.feed(content)
+                                if safe:
+                                    delta["content"] = safe
+                                    yield "data: " + json.dumps(obj, ensure_ascii=False) + "\n\n"
+                            else:
+                                yield "data: " + json.dumps(obj, ensure_ascii=False) + "\n\n"
+                        break
+            except httpx.HTTPError as exc:
+                last_error = f"请求模型服务失败：{exc.__class__.__name__}: {exc}"
+                if not raw_parts and candidate is not chain[-1]:
+                    continue
+                yield SSE_ERROR % json.dumps(last_error, ensure_ascii=False)
+                return
+        if not sent_done:
+            tail = restorer.flush()
+            if tail:
+                yield SSE_CHUNK % json.dumps(tail, ensure_ascii=False)
+            yield "data: [DONE]\n\n"
+
+        reply = engine.restore("".join(raw_parts))
+        if reply:
+            privacy = engine.snapshot()
+            _save_history(bot_id, conv_id, user_question, reply, privacy)
+            try:
+                from ..database import SessionLocal
+
+                with SessionLocal() as ses:
+                    ses.add(PrivacyAudit(
+                        conversation_id=conv_id, direction="out", level=level,
+                        counts=json.dumps(privacy.get("counts", {}), ensure_ascii=False),
+                        placeholders=int(privacy.get("placeholders", 0)),
+                        chars=int(privacy.get("chars", 0)),
+                    ))
+                    ses.commit()
+            except Exception:
+                pass
+        elif last_error:
+            yield SSE_ERROR % json.dumps(last_error, ensure_ascii=False)
+
+    return StreamingResponse(
+        gen(), media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )

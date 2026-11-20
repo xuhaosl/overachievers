@@ -50,6 +50,7 @@ export function ElMessageBoxConfirm(message) {
 // ---------- 智能助手 ----------
 export const aiApi = {
   providers: () => api.get('/ai/providers'),
+  status: () => api.get('/ai/status'),
   bots: () => api.get('/ai/bots'),
   createBot: (data) => api.post('/ai/bots', data),
   updateBot: (id, data) => api.patch(`/ai/bots/${id}`, data),
@@ -64,6 +65,80 @@ export const aiApi = {
   clearMessages: (botId) => api.delete(`/ai/bots/${botId}/messages`),
   setScoreComment: (scoreId, content) => api.patch(`/scores/${scoreId}/ai-comment`, { content }),
   setExamComment: (examId, content) => api.patch(`/exams/${examId}/ai-comment`, { content }),
+}
+
+// ---------- Agent ----------
+export const agentApi = {
+  tools: () => api.get('/agent/tools'),
+  status: () => api.get('/agent/status'),
+  providers: () => api.get('/agent/providers'),
+  profiles: () => api.get('/agent/profiles'),
+  createProfile: (data) => api.post('/agent/profiles', data),
+  updateProfile: (id, data) => api.patch(`/agent/profiles/${id}`, data),
+  deleteProfile: (id) => api.delete(`/agent/profiles/${id}`),
+  conversations: (params) => api.get('/agent/conversations', { params }),
+  createConversation: (data) => api.post('/agent/conversations', data),
+  messages: (convId) => api.get(`/agent/conversations/${convId}/messages`),
+  renameConversation: (convId, data) => api.patch(`/agent/conversations/${convId}`, data),
+  deleteConversation: (convId) => api.delete(`/agent/conversations/${convId}`),
+  pending: (convId) => api.get(`/agent/conversations/${convId}/pending`),
+  confirm: (token) => api.post(`/agent/pending/${token}/confirm`),
+  cancel: (token) => api.post(`/agent/pending/${token}/cancel`),
+  runs: (params) => api.get('/agent/runs', { params }),
+  privacyStatus: () => api.get('/agent/privacy/status'),
+  privacyPreview: (data) => api.post('/agent/privacy/preview', data),
+  privacyAudits: (params) => api.get('/agent/privacy/audits', { params }),
+  invokeTool: (name, args, extra = {}) => api.post(`/agent/tools/${name}`, { args, ...extra }),
+}
+
+// Agent 流式对话：事件类型 delta / tool_call / tool_result / pending_action / error / done
+export async function agentChatStream(body, onEvent) {
+  const res = await fetch('/api/agent/chat', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(localStorage.getItem('sa_token') ? { 'X-Auth-Token': localStorage.getItem('sa_token') } : {}),
+    },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    let detail = res.statusText
+    try {
+      detail = (await res.json()).detail || detail
+    } catch { /* ignore */ }
+    throw new Error(detail)
+  }
+  const reader = res.body.getReader()
+  const dec = new TextDecoder()
+  let buf = ''
+  let stopped = false
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    if (stopped) continue
+    buf += dec.decode(value, { stream: true })
+    let idx
+    while ((idx = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, idx).trim()
+      buf = buf.slice(idx + 1)
+      if (!line.startsWith('data:')) continue
+      const data = line.slice(5).trim()
+      if (!data) continue
+      let obj
+      try {
+        obj = JSON.parse(data)
+      } catch {
+        continue
+      }
+      if (obj.type === 'error') throw new Error(obj.error || 'Agent 运行失败')
+      if (obj.type === 'done') {
+        stopped = true
+        onEvent?.(obj)
+        break
+      }
+      onEvent?.(obj)
+    }
+  }
 }
 
 // 流式对话：POST /ai/chat，逐段回调 assistant 增量文本；ai_error 事件抛错
