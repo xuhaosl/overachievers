@@ -28,33 +28,7 @@
       </el-card>
     </div>
 
-    <el-card class="search-card" shadow="never">
-      <template #header>原题检索（预留）</template>
-      <p class="hint">
-        错题 AI 识别后可联网查找原题（先联网、查不到再由 AI 自组织）。本期仅保留配置入口：未填 Key 时自动跳过联网检索，不影响错题整理。
-      </p>
-      <el-form inline>
-        <el-form-item label="服务商">
-          <el-select v-model="searchConfig.provider" style="width: 150px">
-            <el-option label="Tavily" value="tavily" />
-            <el-option label="Serper" value="serper" />
-            <el-option label="Bing" value="bing" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="API Key">
-          <el-input
-            v-model="searchConfig.api_key"
-            type="password"
-            show-password
-            style="width: 260px"
-            :placeholder="searchConfig.configured ? `已配置 ${searchConfig.api_key_masked}，留空保留` : '暂未接入，可先留空'"
-          />
-        </el-form-item>
-        <el-form-item>
-          <el-button type="primary" :loading="savingSearch" @click="saveSearchConfig">保存</el-button>
-        </el-form-item>
-      </el-form>
-    </el-card>
+    <!-- 原题检索配置入口暂时隐藏：功能尚未接入，保留后端接口，后续接入后再放出 -->
 
     <!-- 添加/编辑 -->
     <el-dialog v-model="editVisible" :title="form.id ? '编辑机器人' : '添加机器人'" width="480px">
