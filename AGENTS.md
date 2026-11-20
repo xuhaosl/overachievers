@@ -98,7 +98,7 @@ oa --json children list
 - **前端构建产物入库**：仓库跟踪 `backend/static/`；改了前端源码要重新 build 并提交产物，
   否则运行中的服务仍是旧界面。
 - **不要用 `pip install -r` 之外的方式引入新依赖**：`backend/requirements.txt` 是唯一
-  后端依赖清单；`cryptography`、`onnxruntime` 等均为可选，缺失时自动降级。
+  后端依赖清单；`cryptography` 已列入依赖，`onnxruntime` 等仍为可选，缺失时自动降级。
 
 ## 指令文件维护规则（长期有效）
 
