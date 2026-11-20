@@ -2,7 +2,7 @@
   <div class="page">
     <div class="page-head">
       <div>
-        <h2>Agent 工作台</h2>
+        <h2>智能前台</h2>
         <p class="hint">
           用对话完成导入、查询、近况分析与成绩整理。所有写操作都会先生成预览，确认后才落库；
           发送给模型的文本默认经过本地脱敏。

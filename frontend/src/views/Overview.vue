@@ -15,6 +15,23 @@
       <el-button @click="$router.push('/charts')">成长</el-button>
     </div>
 
+    <el-card shadow="never" class="avg-card">
+      <div v-if="avgStats.count" class="avg-line">
+        <div class="avg-main">
+          <div class="avg-num">{{ ratePercent(avgStats.rate) }}</div>
+          <div class="avg-label">平均得分率 · 共 {{ avgStats.count }} 次成绩</div>
+        </div>
+        <div class="avg-subjects">
+          <span v-for="s in avgStats.subjects" :key="s.id" class="avg-item">
+            <i class="dot" :style="{ background: s.color }" />
+            {{ s.name }} <b>{{ ratePercent(s.rate) }}</b>
+            <span class="muted">·{{ s.count }} 次</span>
+          </span>
+        </div>
+      </div>
+      <div v-else class="muted">当前时间范围内暂无成绩</div>
+    </el-card>
+
     <h3>得分率成长曲线</h3>
     <el-card shadow="never">
       <div class="chart-filter">
@@ -157,6 +174,36 @@ const chartCount = computed(() => {
     allScores.value.filter((x) => inRange(x.date)).length +
     allExams.value.filter((x) => inRange(x.date)).length
   )
+})
+
+// 当前时间范围内的平均得分率（每次成绩等权），以及各科平均
+const avgStats = computed(() => {
+  const rows = allScores.value.filter((x) => inRange(x.date) && Number.isFinite(Number(x.rate)))
+  const bySubject = new Map()
+  let sum = 0
+  for (const r of rows) {
+    const rate = Number(r.rate)
+    sum += rate
+    if (!bySubject.has(r.subject_id)) {
+      bySubject.set(r.subject_id, {
+        id: r.subject_id,
+        name: r.subject_name,
+        color: r.subject_color,
+        sum: 0,
+        count: 0,
+      })
+    }
+    const g = bySubject.get(r.subject_id)
+    g.sum += rate
+    g.count += 1
+  }
+  return {
+    count: rows.length,
+    rate: rows.length ? sum / rows.length : 0,
+    subjects: [...bySubject.values()]
+      .map((g) => ({ ...g, rate: g.sum / g.count }))
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)),
+  }
 })
 
 async function loadChartData() {
@@ -308,6 +355,55 @@ onUnmounted(() => {
   display: flex;
   gap: 10px;
   margin-bottom: 8px;
+}
+/* 平均得分率小板块 */
+.avg-card {
+  margin-bottom: 8px;
+}
+.avg-card :deep(.el-card__body) {
+  padding: 10px 14px;
+}
+.avg-line {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+.avg-main {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding-right: 16px;
+  border-right: 1px solid var(--el-border-color-lighter);
+}
+.avg-num {
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--el-color-primary);
+}
+.avg-label {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+.avg-subjects {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  font-size: 13px;
+}
+.avg-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+}
+.avg-item .dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 2px;
 }
 /* 两个按钮靠近一点 */
 .toolbar :deep(.el-button + .el-button) {
